@@ -3,15 +3,16 @@ from flask_cors import CORS
 import requests
 import os
 from dotenv import load_dotenv
-from store_blockchain import store_evidence
+from store_blockchain import store_evidence, get_evidence
 import json
 import logging
 import time
 import random
+from datetime import datetime
 
 # Configure Flask app and CORS
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})  # Allow frontend
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -30,28 +31,40 @@ headers = {
     "Content-Type": "application/json"
 }
 
-def make_x_request(url, headers, retries=3, backoff_factor=1):
+def make_x_request(url, headers, params=None, retries=3, backoff_factor=2):
     """Make X API request with retry on 429 errors."""
     for attempt in range(retries):
-        response = requests.get(url, headers=headers)
-        # Log rate limit headers
-        rate_headers = {
-            "X-RateLimit-Limit": response.headers.get("X-RateLimit-Limit"),
-            "X-RateLimit-Remaining": response.headers.get("X-RateLimit-Remaining"),
-            "X-RateLimit-Reset": response.headers.get("X-RateLimit-Reset"),
-            "Retry-After": response.headers.get("Retry-After")
-        }
-        logger.info(f"Rate limit headers: {rate_headers}")
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            # Log rate limit headers
+            rate_headers = {
+                "x-rate-limit-limit": response.headers.get("x-rate-limit-limit"),
+                "x-rate-limit-remaining": response.headers.get("x-rate-limit-remaining"),
+                "x-rate-limit-reset": response.headers.get("x-rate-limit-reset"),
+                "retry-after": response.headers.get("retry-after")
+            }
+            logger.info(f"Rate limit headers for {url}: {rate_headers}")
 
-        if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After")
-            wait_time = int(retry_after) if retry_after and retry_after.isdigit() else (2 ** attempt) * backoff_factor
-            wait_time += random.uniform(0, 0.1)  # Jitter
-            logger.warning(f"429 Too Many Requests. Waiting {wait_time}s (attempt {attempt+1}/{retries})")
-            time.sleep(wait_time)
-            continue
-        return response
-    return response  # Return last response if retries exhausted
+            if response.status_code == 429:
+                reset_time = response.headers.get("x-rate-limit-reset")
+                wait_time = int(response.headers.get("retry-after", 0)) or (2 ** attempt) * backoff_factor
+                if reset_time:
+                    reset_dt = datetime.fromtimestamp(int(reset_time))
+                    logger.warning(f"Rate limit reset at {reset_dt}")
+                logger.warning(f"429 Too Many Requests. Waiting {wait_time}s (attempt {attempt+1}/{retries})")
+                time.sleep(wait_time + random.uniform(0, 0.1))
+                continue
+            response.raise_for_status()
+            return response
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error: {str(e)}")
+            if attempt == retries - 1:
+                raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {str(e)}")
+            if attempt == retries - 1:
+                raise
+    raise Exception("Max retries exceeded")
 
 @app.route('/fetch-x-post', methods=['POST'])
 def fetch_x_post():
@@ -65,24 +78,25 @@ def fetch_x_post():
             return jsonify({"error": "post_id is required"}), 400
 
         # Fetch post from X API with retry
-        url = f"https://api.x.com/2/tweets/{post_id}?tweet.fields=created_at,author_id"
-        response = make_x_request(url, headers)
-        if response.status_code != 200:
-            logger.error(f"X API error: {response.text}")
-            return jsonify({"error": f"Failed to fetch post from X: {response.text}"}), response.status_code
-        post_data = response.json().get('data')
-        if not post_data:
-            logger.error("No post data returned")
-            return jsonify({"error": "Post not found"}), 404
+        url = f"https://api.x.com/2/tweets/{post_id}"
+        params = {
+            "tweet.fields": "id,text,author_id,created_at",
+            "expansions": "author_id",
+            "user.fields": "username"
+        }
+        logger.info(f"Attempting to fetch post_id {post_id}")
+        response = make_x_request(url, headers, params)
+        response_data = response.json()
+        
+        if not response_data.get('data'):
+            error_detail = response_data.get('errors', [{}])[0].get('detail', 'No details provided')
+            logger.error(f"No post data returned for post_id {post_id}: {response_data}")
+            return jsonify({"error": f"Post not found or inaccessible: {error_detail}. Please verify the post ID is valid and public (e.g., from @NASA or @elonmusk)."}), 404
 
-        # Get author username
-        author_id = post_data['author_id']
-        user_url = f"https://api.x.com/2/users/{author_id}?user.fields=username"
-        user_response = make_x_request(user_url, headers)
-        if user_response.status_code != 200:
-            logger.error(f"User API error: {user_response.text}")
-            return jsonify({"error": f"Failed to fetch user data: {user_response.text}"}), user_response.status_code
-        username = user_response.json()['data']['username']
+        post_data = response_data['data']
+        # Get author username from expansions
+        users = response_data.get('includes', {}).get('users', [])
+        username = next((user['username'] for user in users if user['id'] == post_data['author_id']), "unknown")
 
         # Prepare post data
         post = {
@@ -96,16 +110,27 @@ def fetch_x_post():
         # Verify input text if provided
         verified = input_text.strip() == post_data['text'].strip() if input_text else None
 
-        logger.info(f"Fetched post {post_id} successfully")
+        logger.info(f"Fetched post {post_id} successfully: {post}")
         return jsonify({
             "post": post,
             "verified": verified
         })
 
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code
+        error_msg = e.response.text
+        logger.error(f"X API error for post_id {post_id}: {status_code} - {error_msg}")
+        if status_code == 401:
+            return jsonify({"error": "Authentication failed: Invalid or expired Bearer Token. Please verify X_BEARER_TOKEN in .env and ensure it has read permissions."}), 401
+        if status_code == 429:
+            reset_time = e.response.headers.get("x-rate-limit-reset", "unknown")
+            return jsonify({"error": f"Rate limit exceeded. Try again after reset time: {reset_time}"}), 429
+        return jsonify({"error": f"Failed to fetch post: {error_msg}"}), status_code
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Unexpected error for post_id {post_id}: {str(e)}")
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
+# Existing /store-evidence and /get-evidence endpoints (unchanged)
 @app.route('/store-evidence', methods=['POST'])
 def store_evidence_endpoint():
     try:
@@ -115,7 +140,6 @@ def store_evidence_endpoint():
             logger.error("No evidence provided")
             return jsonify({"error": "Evidence is required"}), 400
 
-        # Validate evidence JSON structure
         try:
             evidence_json = json.loads(evidence)
             required_keys = ["id", "text", "author_username"]
@@ -149,7 +173,6 @@ def get_evidence():
             logger.error("No evidence ID provided")
             return jsonify({"error": "Evidence ID is required"}), 400
 
-        from store_blockchain import get_evidence
         evidence = get_evidence(evidence_id)
         if evidence:
             logger.info(f"Retrieved evidence ID {evidence_id}")
