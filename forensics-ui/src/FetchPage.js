@@ -9,13 +9,27 @@ function FetchPage() {
 
   const handleFetchPost = async (e) => {
     e.preventDefault();
-    if (!postId) {
-      setStatus('Error: Please enter a post ID');
+    if (!postId && !text.trim()) {
+      setStatus('Error: Please enter a post ID or post text');
       return;
     }
     setStatus('Fetching...');
     try {
-      const payload = { post_id: postId, input_text: text.trim() || '' };
+      let finalPostId = postId;
+      if (!postId && text.trim()) {
+        setStatus('Searching for post ID...');
+        const searchResponse = await axios.post('http://localhost:5000/search-x-post', { content: text.trim() });
+        console.log('Search response:', searchResponse.data); // Debug
+        if (searchResponse.data.error) {
+          setStatus(`Error: ${searchResponse.data.error}${searchResponse.data.error.includes('Service Unavailable') ? ' - Please try again later.' : ''}`);
+          setResult(null);
+          setText('');
+          return;
+        }
+        finalPostId = searchResponse.data.id;
+        setPostId(finalPostId);
+      }
+      const payload = { post_id: finalPostId, input_text: text.trim() || '' };
       const response = await axios.post('http://localhost:5000/fetch-x-post', payload);
       console.log('Fetch response:', response.data); // Debug
       if (response.data.error) {
@@ -26,7 +40,7 @@ function FetchPage() {
         if (!text.trim()) {
           setText(response.data.text);
         }
-        const verified = text.trim() ? text.trim() === response.data.text.trim() : null;
+        const verified = text.trim() ? !response.data.text_mismatch : null;
         setResult({ ...response.data, verified });
         setStatus(
           verified === null
@@ -38,7 +52,7 @@ function FetchPage() {
       }
     } catch (error) {
       console.error('Fetch error:', error.response?.data || error.message); // Debug
-      setStatus(`Error: ${error.response?.data?.error || error.message}`);
+      setStatus(`Error: ${error.response?.data?.error || error.message}${error.response?.data?.error?.includes('Service Unavailable') ? ' - Please try again later.' : ''}`);
       setResult(null);
       setText('');
     }
