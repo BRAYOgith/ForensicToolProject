@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 import requests
 import json
@@ -8,12 +8,18 @@ import os
 import logging
 import re
 import time
+import sqlite3
+import jwt
+import datetime
+import pdfkit
+from functools import wraps
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+app.config['SECRET_KEY'] = 'your-secret-key'  # Replace with a secure key
 
 load_dotenv()
 bearer_token = os.getenv("X_BEARER_TOKEN")
@@ -25,6 +31,55 @@ headers = {
     "Authorization": f"Bearer {bearer_token}"
 }
 
+# Database setup
+def init_db():
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS fetched_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        post_id TEXT,
+        content TEXT,
+        author_username TEXT,
+        created_at TEXT,
+        media_urls TEXT,
+        timestamp TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS stored_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        evidence_id TEXT,
+        tx_hash TEXT,
+        timestamp TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# JWT decorator
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token or not token.startswith('Bearer '):
+            return jsonify({'error': 'Token is missing or invalid'}), 401
+        try:
+            token = token.split(' ')[1]
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = data['user_id']
+        except:
+            return jsonify({'error': 'Token is invalid'}), 401
+        return f(current_user, *args, **kwargs)
+    return decorated
+
 def expand_urls(text, urls):
     if not urls:
         return text
@@ -33,8 +88,27 @@ def expand_urls(text, urls):
             text = text.replace(url_obj['url'], url_obj['expanded_url'])
     return text
 
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT id, password FROM users WHERE username = ?', (username,))
+    user = c.fetchone()
+    conn.close()
+    if user and user[1] == password:  # Use bcrypt in production
+        token = jwt.encode({
+            'user_id': user[0],
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+        }, app.config['SECRET_KEY'])
+        return jsonify({'token': token, 'user_id': user[0]})
+    return jsonify({'error': 'Invalid credentials'}), 401
+
 @app.route('/fetch-x-post', methods=['POST'])
-def fetch_x_post():
+@token_required
+def fetch_x_post(current_user):
     try:
         data = request.get_json()
         post_id = data.get('post_id')
@@ -87,13 +161,24 @@ def fetch_x_post():
             if not post_data["text_mismatch"]:
                 post_data["text"] = input_text
 
+        # Store fetched post in database
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute(
+            'INSERT INTO fetched_evidence (user_id, post_id, content, author_username, created_at, media_urls, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (current_user, post_id, expanded_text, author_username, created_at, json.dumps(media_urls), datetime.datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+
         return jsonify(post_data), 200
     except Exception as e:
         logger.error(f"Error fetching post {post_id}: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/search-x-post', methods=['POST'])
-def search_x_post():
+@token_required
+def search_x_post(current_user):
     try:
         data = request.get_json()
         content = data.get('content')
@@ -142,20 +227,33 @@ def search_x_post():
         author = next((user for user in users if user['id'] == tweet['author_id']), {})
         media_urls = [url['expanded_url'] for url in urls if 'media' in url.get('expanded_url', '').lower()]
 
-        return jsonify({
+        post_data = {
             "id": tweet['id'],
             "text": expanded_text,
             "author_username": author.get('username', ''),
             "created_at": tweet.get('created_at', ''),
             "author_id": tweet.get('author_id', ''),
             "media_urls": media_urls
-        }), 200
+        }
+
+        # Store searched post in database
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute(
+            'INSERT INTO fetched_evidence (user_id, post_id, content, author_username, created_at, media_urls, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (current_user, tweet['id'], expanded_text, author.get('username', ''), tweet.get('created_at', ''), json.dumps(media_urls), datetime.datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+
+        return jsonify(post_data), 200
     except Exception as e:
         logger.error(f"Error searching posts: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/store-evidence', methods=['POST'])
-def store_evidence_endpoint():
+@token_required
+def store_evidence_endpoint(current_user):
     try:
         data = request.get_json()
         evidence_data = data.get('evidence')
@@ -169,17 +267,30 @@ def store_evidence_endpoint():
             return jsonify({"error": "Failed to store evidence"}), 500
 
         tx_hash = '0x' + result['receipt']['transactionHash'].hex()
+        evidence_id = result['evidence_id']
+
+        # Store evidence metadata in database
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute(
+            'INSERT INTO stored_evidence (user_id, evidence_id, tx_hash, timestamp) VALUES (?, ?, ?, ?)',
+            (current_user, str(evidence_id), tx_hash, datetime.datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+
         logger.info(f"Stored evidence with tx hash: {tx_hash}")
         return jsonify({
             "transactionHash": tx_hash,
-            "evidenceId": result['evidence_id']
+            "evidenceId": evidence_id
         }), 200
     except Exception as e:
         logger.error(f"Error storing evidence: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/get-evidence', methods=['POST'])
-def get_evidence_endpoint():
+@token_required
+def get_evidence_endpoint(current_user):
     try:
         data = request.get_json()
         logger.info(f"Received get-evidence request: {data}")
@@ -210,7 +321,8 @@ def get_evidence_endpoint():
         return jsonify({"error": f"Failed to retrieve evidence: {str(e)}"}), 500
 
 @app.route('/fetch-evidence', methods=['POST'])
-def fetch_evidence():
+@token_required
+def fetch_evidence(current_user):
     try:
         data = request.get_json()
         tx_hash = data.get('tx_hash')
@@ -218,7 +330,6 @@ def fetch_evidence():
             logger.error("No transaction hash provided")
             return jsonify({"error": "Transaction hash is required"}), 400
 
-        # Normalize hash by removing '0x' if present
         if tx_hash.startswith('0x'):
             tx_hash = tx_hash[2:]
         evidence_id = get_evidence_id_by_tx_hash(tx_hash)
@@ -227,6 +338,56 @@ def fetch_evidence():
     except Exception as e:
         logger.error(f"Error fetching evidence for tx hash {tx_hash}: {str(e)}")
         return jsonify({"error": str(e)}), 400
+
+@app.route('/report/<user_id>', methods=['GET'])
+@token_required
+def report(current_user, user_id):
+    if str(current_user) != user_id:
+        return jsonify({'error': 'Unauthorized access'}), 403
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
+    username = c.fetchone()[0]
+    c.execute('SELECT id, post_id, content, author_username, created_at, media_urls, timestamp FROM fetched_evidence WHERE user_id = ?', (user_id,))
+    fetched = [{'id': r[0], 'post_id': r[1], 'content': r[2], 'author_username': r[3], 'created_at': r[4], 'media_urls': json.loads(r[5]), 'timestamp': r[6]} for r in c.fetchall()]
+    c.execute('SELECT id, evidence_id, tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
+    stored = [{'id': r[0], 'evidence_id': r[1], 'tx_hash': r[2], 'timestamp': r[3]} for r in c.fetchall()]
+    conn.close()
+    return jsonify({'username': username, 'fetched': fetched, 'stored': stored})
+
+@app.route('/download-report/<user_id>', methods=['GET'])
+@token_required
+def download_report(current_user, user_id):
+    if str(current_user) != user_id:
+        return jsonify({'error': 'Unauthorized access'}), 403
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
+    username = c.fetchone()[0]
+    c.execute('SELECT post_id, content, author_username, created_at, media_urls, timestamp FROM fetched_evidence WHERE user_id = ?', (user_id,))
+    fetched = c.fetchall()
+    c.execute('SELECT evidence_id, tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
+    stored = c.fetchall()
+    conn.close()
+    html = f"""
+    <h1>Forensic Report for {username}</h1>
+    <h2>Fetched Evidence</h2>
+    <ul>
+    {''.join([f'<li>Post ID: {r[0]}, Content: {r[1]}, Author: {r[2]}, Created: {r[3]}, Media: {r[4]}, Fetched: {r[5]}</li>' for r in fetched])}
+    </ul>
+    <h2>Stored Evidence</h2>
+    <ul>
+    {''.join([f'<li>Evidence ID: {r[0]}, Tx Hash: {r[1]}, Stored: {r[2]}</li>' for r in stored])}
+    </ul>
+    <h2>Summary</h2>
+    <p>Total Fetched: {len(fetched)}</p>
+    <p>Total Stored: {len(stored)}</p>
+    """
+    pdf = pdfkit.from_string(html, False)
+    response = make_response(pdf)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=report_{user_id}.pdf'
+    return response
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

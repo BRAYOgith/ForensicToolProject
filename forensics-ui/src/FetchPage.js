@@ -15,10 +15,14 @@ function FetchPage() {
     }
     setStatus('Fetching...');
     try {
+      const token = localStorage.getItem('token');
       let finalPostId = postId;
       if (!postId && text.trim()) {
         setStatus('Searching for post ID...');
-        const searchResponse = await axios.post('http://localhost:5000/search-x-post', { content: text.trim() });
+        const searchResponse = await axios.post('http://localhost:5000/search-x-post', 
+          { content: text.trim() },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         console.log('Search response:', searchResponse.data); // Debug
         if (searchResponse.data.error) {
           setStatus(`Error: ${searchResponse.data.error}${searchResponse.data.error.includes('Service Unavailable') ? ' - Please try again later.' : ''}`);
@@ -30,7 +34,9 @@ function FetchPage() {
         setPostId(finalPostId);
       }
       const payload = { post_id: finalPostId, input_text: text.trim() || '' };
-      const response = await axios.post('http://localhost:5000/fetch-x-post', payload);
+      const response = await axios.post('http://localhost:5000/fetch-x-post', payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       console.log('Fetch response:', response.data); // Debug
       if (response.data.error) {
         setStatus(`Error: ${response.data.error}`);
@@ -65,17 +71,19 @@ function FetchPage() {
     }
     setStatus('Storing...');
     try {
+      const token = localStorage.getItem('token');
       const evidence = {
         id: result.id,
         text: text.trim() || result.text,
         author_username: result.author_username,
         created_at: result.created_at,
         author_id: result.author_id,
-        media_urls: result.media_urls || [],
-        input_text: text.trim() || null
+        media_urls: result.media_urls || []
       };
       const response = await axios.post('http://localhost:5000/store-evidence', {
         evidence: JSON.stringify(evidence)
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
       });
       console.log('Store response:', response.data); // Debug
       if (response.data.error) {
