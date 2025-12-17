@@ -3,202 +3,165 @@ import axios from 'axios';
 
 function FetchPage() {
   const [postId, setPostId] = useState('');
-  const [text, setText] = useState('');
+  const [fetchedPost, setFetchedPost] = useState(null);
   const [status, setStatus] = useState('Ready');
-  const [result, setResult] = useState(null);
+  const [storedResult, setStoredResult] = useState(null);
 
   const handleFetchPost = async (e) => {
     e.preventDefault();
-    if (!postId && !text.trim()) {
-      setStatus('Error: Please enter a post ID or post text');
+    if (!postId) {
+      setStatus('Error: Please enter a post ID');
       return;
     }
-    setStatus('Fetching...');
+    setStatus('Fetching post...');
     try {
       const token = localStorage.getItem('token');
-      let finalPostId = postId;
-      if (!postId && text.trim()) {
-        setStatus('Searching for post ID...');
-        const searchResponse = await axios.post('http://localhost:5000/search-x-post', 
-          { content: text.trim() },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        console.log('Search response:', searchResponse.data); // Debug
-        if (searchResponse.data.error) {
-          setStatus(`Error: ${searchResponse.data.error}${searchResponse.data.error.includes('Service Unavailable') ? ' - Please try again later.' : ''}`);
-          setResult(null);
-          setText('');
-          return;
-        }
-        finalPostId = searchResponse.data.id;
-        setPostId(finalPostId);
-      }
-      const payload = { post_id: finalPostId, input_text: text.trim() || '' };
-      const response = await axios.post('http://localhost:5000/fetch-x-post', payload, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      console.log('Fetch response:', response.data); // Debug
+      const response = await axios.post('http://localhost:5000/fetch-x-post', 
+        { post_id: postId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      console.log('Fetch post response:', response.data);
       if (response.data.error) {
         setStatus(`Error: ${response.data.error}`);
-        setResult(null);
-        setText('');
+        setFetchedPost(null);
       } else {
-        if (!text.trim()) {
-          setText(response.data.text);
-        }
-        const verified = text.trim() ? !response.data.text_mismatch : null;
-        setResult({ ...response.data, verified });
-        setStatus(
-          verified === null
-            ? 'Success: Post fetched, text populated'
-            : verified
-            ? 'Success: Verified X post'
-            : 'Warning: Text does not match post'
-        );
+        setFetchedPost(response.data);
+        setStatus('Success: Post fetched');
       }
     } catch (error) {
-      console.error('Fetch error:', error.response?.data || error.message); // Debug
-      setStatus(`Error: ${error.response?.data?.error || error.message}${error.response?.data?.error?.includes('Service Unavailable') ? ' - Please try again later.' : ''}`);
-      setResult(null);
-      setText('');
+      console.error('Fetch post error:', error.response?.data || error.message);
+      setStatus(`Error: ${error.response?.data?.error || error.message}`);
+      setFetchedPost(null);
     }
   };
 
-  const handleStorePost = async () => {
-    if (!result) {
-      setStatus('Error: No post to store');
+  const handleStoreEvidence = async () => {
+    if (!fetchedPost) {
+      setStatus('Error: No post fetched to store');
       return;
     }
-    setStatus('Storing...');
+    setStatus('Storing evidence to blockchain...');
     try {
       const token = localStorage.getItem('token');
       const evidence = {
-        id: result.id,
-        text: text.trim() || result.text,
-        author_username: result.author_username,
-        created_at: result.created_at,
-        author_id: result.author_id,
-        media_urls: result.media_urls || []
+        evidence: {
+          id: fetchedPost.id,
+          content: fetchedPost.text,
+          author_username: fetchedPost.author_username,
+          created_at: fetchedPost.created_at,
+          media_urls: fetchedPost.media_urls
+        }
       };
-      const response = await axios.post('http://localhost:5000/store-evidence', {
-        evidence: JSON.stringify(evidence)
-      }, {
+      const response = await axios.post('http://localhost:5000/store-evidence', evidence, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('Store response:', response.data); // Debug
-      if (response.data.error) {
-        setStatus(`Error: ${response.data.error}`);
-      } else {
-        setStatus(`Success: Stored with hash ${response.data.transactionHash}, Evidence ID: ${response.data.evidenceId}`);
-        setResult({
-          ...result,
-          transactionHash: response.data.transactionHash,
-          evidenceId: response.data.evidenceId
-        });
-      }
+      console.log('Store evidence response:', response.data);
+      setStoredResult({
+        evidence_id: response.data.evidence_id,
+        tx_hash: response.data.tx_hash,
+        eth_tx_hash: response.data.eth_tx_hash
+      });
+      setStatus(`Success: Stored with Evidence ID: ${response.data.evidence_id}`);
     } catch (error) {
-      console.error('Store error:', error.response?.data || error.message); // Debug
-      setStatus(`Error: ${error.response?.data?.error || error.message}`);
+      console.error('Store evidence error:', error.response?.data || error.message);
+      setStatus(`Error storing evidence: ${error.response?.data?.error || error.message}`);
+      setStoredResult(null);
     }
   };
 
+  const defamation = fetchedPost?.defamation;
+  const isDefamatory = defamation?.is_defamatory;
+  const confidence = defamation?.confidence || 0;
+
   return (
     <div className="bg-white p-6 rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-4">Fetch & Store Post</h2>
+      <h2 className="text-2xl font-bold mb-4">Fetch X Post</h2>
       <form onSubmit={handleFetchPost}>
-        <input
-          type="text"
-          value={postId}
-          onChange={(e) => setPostId(e.target.value)}
-          placeholder="Enter X post ID (e.g., from https://x.com/amerix)"
-          className="w-full p-2 mb-4 border rounded"
-        />
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Enter post text (optional, will be populated after fetch)"
-          rows="6"
-          className="w-full p-2 mb-4 border rounded"
-        />
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-1">Post ID</label>
+          <input
+            type="text"
+            value={postId}
+            onChange={(e) => setPostId(e.target.value)}
+            placeholder="Enter post ID (e.g., 1978725344212336951)"
+            className="w-full p-2 border rounded"
+          />
+        </div>
         <button
           type="submit"
           className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
         >
-          Fetch and Verify Post
+          Fetch Post
         </button>
       </form>
-      {result && (
-        <button
-          onClick={handleStorePost}
-          className="w-full mt-4 bg-green-500 text-white p-2 rounded hover:bg-green-600"
-        >
-          Store on Blockchain
-        </button>
-      )}
-      <p className="mt-4 text-sm">Status: {status}</p>
-      {result && (
+
+      {fetchedPost && (
         <div className="mt-6 p-4 bg-white border rounded-lg shadow-sm">
-          <div className="flex items-center mb-2">
-            <span className="font-bold">@{result.author_username}</span>
-            <span className="ml-2 text-gray-500 text-sm">
-              {new Date(result.created_at).toLocaleString()}
-            </span>
-          </div>
-          <p className="mb-2"><strong>Fetched Text:</strong> {result.text}</p>
-          {result.input_text && (
-            <p className="mb-2"><strong>User-Provided Text:</strong> {result.input_text}</p>
-          )}
-          {result.media_urls?.length > 0 && (
-            <div className="mb-2">
-              <strong>Media URLs:</strong>
-              <ul className="list-disc pl-5">
-                {result.media_urls.map((url, i) => (
-                  <li key={i}>
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">
-                      {url}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+          {defamation && (
+            <div className={`mb-4 p-4 rounded-lg text-white font-bold text-center text-lg ${isDefamatory ? 'bg-red-600' : 'bg-green-600'}`}>
+              {isDefamatory 
+                ? `HIGH RISK – DEFAMATORY CONTENT DETECTED (${(confidence * 100).toFixed(1)}% confidence)` 
+                : `LOW RISK – No defamation detected (${(confidence * 100).toFixed(1)}% confidence)`
+              }
             </div>
           )}
-          <p className="text-sm text-gray-500">Post ID: {result.id}</p>
-          {result.verified !== undefined && (
-            <p className={`text-sm ${result.verified ? 'text-green-500' : result.verified === null ? 'text-gray-500' : 'text-red-500'}`}>
-              {result.verified
-                ? 'Verified: This is a valid X post'
-                : result.verified === null
-                ? 'Verification Skipped: Text populated automatically'
-                : 'Not Verified: Text does not match post'}
-            </p>
+
+          <h3 className="text-xl font-bold mb-2">Fetched Post</h3>
+          <p className="mb-2"><strong>Post ID:</strong> {fetchedPost.id || 'N/A'}</p>
+          <p className="mb-2"><strong>Content:</strong> {fetchedPost.text || 'N/A'}</p>
+          <p className="mb-2"><strong>Author:</strong> {fetchedPost.author_username || 'N/A'}</p>
+          <p className="mb-2"><strong>Created:</strong> {fetchedPost.created_at || 'N/A'}</p>
+          
+          {fetchedPost.media_urls?.length > 0 && (
+            <div className="mb-2">
+              <strong>Media:</strong>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {fetchedPost.media_urls.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`Media ${i}`}
+                    className="max-w-full h-auto rounded"
+                    onError={(e) => (e.target.style.display = 'none')}
+                  />
+                ))}
+              </div>
+            </div>
           )}
-          {result.transactionHash && (
-            <p className="text-sm text-blue-500">Transaction Hash: {result.transactionHash}</p>
-          )}
-          {result.evidenceId !== undefined && result.evidenceId !== null && (
-            <p className="text-sm text-blue-500">Evidence ID: {result.evidenceId}</p>
-          )}
-          {status.includes('Error') && (
-            <p className="text-sm text-red-500 mt-2">
-              {status.includes('Post not found') ? (
-                <>
-                  Try finding a recent public post at{' '}
-                  <a href="https://x.com/amerix" target="_blank" rel="noopener noreferrer" className="underline">
-                    x.com/amerix
-                  </a>{' '}
-                  or{' '}
-                  <a href="https://x.com/citizentvkenya" target="_blank" rel="noopener noreferrer" className="underline">
-                    x.com/citizentvkenya
-                  </a>{' '}
-                  and copy the post ID from the URL.
-                </>
-              ) : (
-                'If the error persists, check the backend logs or ensure your wallet has sufficient Sepolia ETH.'
-              )}
-            </p>
-          )}
+
+          <button
+            type="button"
+            onClick={handleStoreEvidence}
+            className={`w-full text-white p-3 rounded mt-4 font-bold transition-all ${
+              isDefamatory 
+                ? 'bg-red-600 hover:bg-red-700' 
+                : 'bg-green-500 hover:bg-green-600'
+            }`}
+          >
+            {isDefamatory ? 'STORE HIGH-RISK EVIDENCE NOW' : 'Store to Blockchain (Optional)'}
+          </button>
         </div>
       )}
+
+      {storedResult && (
+        <div className="mt-4 p-4 bg-gray-100 rounded">
+          <p className="font-bold text-green-600">Evidence Successfully Stored!</p>
+          <p><strong>Evidence ID:</strong> {storedResult.evidence_id}</p>
+          <p><strong>Contract Tx Hash:</strong> {storedResult.tx_hash}</p>
+          <p><strong>Ethereum Tx Hash:</strong> 
+            <a 
+              href={`https://sepolia.etherscan.io/tx/${storedResult.eth_tx_hash}`} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-blue-500 hover:underline"
+            >
+              {storedResult.eth_tx_hash}
+            </a>
+          </p>
+        </div>
+      )}
+
+      <p className="mt-4 text-sm">Status: {status}</p>
     </div>
   );
 }

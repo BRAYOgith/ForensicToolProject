@@ -7,7 +7,7 @@ import ReportPage from './ReportPage';
 import './index.css';
 
 function App() {
-  const isAuthenticated = !!localStorage.getItem('token'); // Check if user is logged in
+  const isAuthenticated = !!localStorage.getItem('token');
 
   return (
     <Router>
@@ -41,9 +41,9 @@ function App() {
         <div className="w-full max-w-lg">
           <Routes>
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/" element={isAuthenticated ? <FetchPage /> : <Navigate to="/login" />} />
-            <Route path="/retrieve" element={isAuthenticated ? <RetrievePage /> : <Navigate to="/login" />} />
-            <Route path="/report" element={isAuthenticated ? <ReportPage /> : <Navigate to="/login" />} />
+            <Route path="/" element={isAuthenticated ? <FetchPage /> : <Navigate to="/login" replace />} />
+            <Route path="/retrieve" element={isAuthenticated ? <RetrievePage /> : <Navigate to="/login" replace />} />
+            <Route path="/report" element={isAuthenticated ? <ReportPage /> : <Navigate to="/login" replace />} />
           </Routes>
         </div>
       </div>
