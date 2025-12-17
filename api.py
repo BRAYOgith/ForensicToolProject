@@ -3,7 +3,6 @@ from flask_cors import CORS
 import requests
 import json
 from store_blockchain import store_evidence, get_evidence, get_evidence_by_tx_hash
-from dotenv import load_dotenv
 import os
 import logging
 import re
@@ -14,7 +13,6 @@ import pdfkit
 from functools import wraps
 from datetime import timedelta
 from bcrypt import gensalt, hashpw, checkpw
-
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
@@ -22,21 +20,29 @@ logging.basicConfig(level=logging.INFO, filename='forensic.log')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
-load_dotenv()
+
+# Updated CORS to allow live Vercel domain + localhost for development
+allowed_origins = [
+    "https://forensic-tool-project.vercel.app",  # Change if your Vercel URL is different
+    "http://localhost:3000"
+]
+CORS(app, resources={r"/*": {"origins": allowed_origins}})
+
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key')
 
-MODEL_PATH = "chainforensix_defamation_model"
+# Correct Hugging Face model repository
+MODEL_NAME = "Brayo44/chainforensix_defamation_model"
+
 tokenizer = None
 model = None
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-    model.eval()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Loading defamation model from Hugging Face: {MODEL_NAME}")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
     model.to(device)
+    model.eval()
     logger.info(f"Defamation model loaded on {device}")
 except Exception as e:
     logger.warning(f"Defamation model not loaded: {e}")
@@ -44,20 +50,18 @@ except Exception as e:
 def predict_defamatory(text):
     if not tokenizer or not model:
         return {"is_defamatory": False, "confidence": 0.0}
-
     # NEW: Quick keyword check to reduce false positives
     safe_keywords = ['congrat', 'congrats', 'well done', 'good', 'positive', 'welcome', 'happy', 'celebrate', 'victory', 'win', 'president', 'FA', 'years', '👌']
     if any(word in text.lower() for word in safe_keywords):
         logger.info("Safe keywords detected – lowering confidence")
         return {"is_defamatory": False, "confidence": 0.0}
-
     try:
         inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(device)
         with torch.no_grad():
             outputs = model(**inputs)
             prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
             confidence = float(prob[0][1].item())
-        is_defamatory = confidence >= 0.90  # NEW: Raised threshold to 0.90
+        is_defamatory = confidence >= 0.90 # NEW: Raised threshold to 0.90
         return {"is_defamatory": is_defamatory, "confidence": round(confidence, 4)}
     except Exception as e:
         logger.error(f"Prediction error: {e}")
@@ -156,11 +160,6 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
     return decorated
 
-def clean_text(text):
-    text = str(text)
-    text = re.sub(r'http\S+|@\w+|#[^\s]+|[^\w\s]', '', text)
-    return text.strip()
-
 def expand_urls(text, urls):
     if not urls:
         return text
@@ -223,12 +222,10 @@ def fetch_x_post(current_user):
         input_text = data.get('input_text', '')
         if not post_id:
             return jsonify({"error": "Post ID is required"}), 400
-
         url = f"https://api.x.com/2/tweets/{post_id}?expansions=author_id,attachments.media_keys&user.fields=username&tweet.fields=created_at,entities,attachments&media.fields=media_key,type,url"
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             return jsonify({"error": f"Failed to fetch post: {response.text}"}), response.status_code
-
         response_data = response.json()
         tweet_data = response_data.get('data', {})
         tweet_text = tweet_data.get('text', '')
@@ -237,20 +234,16 @@ def fetch_x_post(current_user):
         created_at = tweet_data.get('created_at', '')
         author_id = tweet_data.get('author_id', '')
         expanded_text = expand_urls(tweet_text, urls)
-
         users = response_data.get('includes', {}).get('users', [])
         author_username = next((user['username'] for user in users if user['id'] == author_id), '')
-
         media_urls = []
         media = response_data.get('includes', {}).get('media', [])
         for media_item in media:
             if media_item.get('type') == 'photo' and media_item.get('url'):
                 media_urls.append(media_item['url'])
-
         # NEW: Defamation scan
         defamation_result = predict_defamatory(expanded_text)
         logger.info(f"Defamation scan for post {post_id}: {defamation_result}")
-
         post_data = {
             "id": post_id,
             "text": expanded_text,
@@ -259,9 +252,8 @@ def fetch_x_post(current_user):
             "author_id": author_id,
             "media_urls": media_urls,
             "input_text": input_text,
-            "defamation": defamation_result  # NEW: Return AI result
+            "defamation": defamation_result # NEW: Return AI result
         }
-
         if input_text:
             normalized_input = re.sub(r'\s+', ' ', input_text.strip().lower())
             normalized_fetched = re.sub(r'\s+', ' ', expanded_text.strip().lower())
@@ -271,7 +263,6 @@ def fetch_x_post(current_user):
                 post_data["text"] = input_text
         else:
             verified = None
-
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -280,14 +271,12 @@ def fetch_x_post(current_user):
             (current_user, post_id, expanded_text, author_username, created_at, json.dumps(media_urls), datetime.datetime.now().isoformat(), verified)
         )
         evidence_db_id = c.lastrowid
-
         c.execute(
             'INSERT INTO requests_log (user_id, request_type, timestamp) VALUES (?, ?, ?)',
             (current_user, 'fetch', datetime.datetime.now().isoformat())
         )
         conn.commit()
         conn.close()
-
         return jsonify(post_data), 200
     except Exception as e:
         logger.error(f"Error in fetch_x_post: {str(e)}")
@@ -303,10 +292,8 @@ def store_evidence_endpoint(current_user):
         if not evidence_data:
             logger.error("Evidence data is required")
             return jsonify({"error": "Evidence data is required"}), 400
-
         if isinstance(evidence_data, str):
             evidence_data = json.loads(evidence_data)
-
         evidence_for_blockchain = {
             "hash": evidence_data.get("id", ""),
             "timestamp": evidence_data.get("created_at", datetime.datetime.now().isoformat()),
@@ -316,16 +303,13 @@ def store_evidence_endpoint(current_user):
             "mediaUrls": evidence_data.get("media_urls", [])
         }
         logger.info(f"Sending to blockchain: {evidence_for_blockchain}")
-
         result = store_evidence(json.dumps(evidence_for_blockchain))
         if not result or result.get('evidence_id') == -1:
             logger.error(f"Failed to store evidence: {result}")
             return jsonify({"error": "Failed to store evidence on blockchain"}), 500
-
         tx_hash = result['tx_hash']
         eth_tx_hash = result['eth_tx_hash']
         evidence_id = result['evidence_id']
-
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -334,7 +318,6 @@ def store_evidence_endpoint(current_user):
         )
         conn.commit()
         conn.close()
-
         return jsonify({
             "evidence_id": evidence_id,
             "tx_hash": tx_hash,
@@ -352,11 +335,9 @@ def get_evidence_endpoint(current_user):
         evidence_id = data.get('evidence_id')
         if evidence_id is None or not str(evidence_id).isdigit():
             return jsonify({"error": "Valid evidence ID is required"}), 400
-
         evidence = get_evidence(int(evidence_id))
         if not evidence:
             return jsonify({"error": "Evidence not found"}), 404
-
         evidence_data = {
             "id": evidence.get('hash', ''),
             "text": evidence.get('content', ''),
@@ -365,7 +346,6 @@ def get_evidence_endpoint(current_user):
             "created_at": evidence.get('timestamp', ''),
             "media_urls": evidence.get('mediaUrls', [])
         }
-
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -374,7 +354,6 @@ def get_evidence_endpoint(current_user):
         )
         conn.commit()
         conn.close()
-
         return jsonify({"evidence_id": evidence_id, "data": evidence_data}), 200
     except Exception as e:
         logger.error(f"Failed to retrieve evidence: {str(e)}")
@@ -388,15 +367,12 @@ def retrieve_evidence(current_user):
         tx_hash = data.get('transaction_hash')
         if not tx_hash:
             return jsonify({"error": "Transaction hash is required"}), 400
-
         normalized_tx_hash = tx_hash if tx_hash.startswith('0x') else f'0x{tx_hash}'
         if len(normalized_tx_hash) != 66 or not re.match(r'^0x[0-9a-fA-F]{64}$', normalized_tx_hash):
             return jsonify({"error": "Invalid transaction hash format"}), 400
-
         evidence = get_evidence_by_tx_hash(normalized_tx_hash)
         if not evidence:
             return jsonify({"error": "Evidence not found for transaction hash"}), 404
-
         evidence_data = {
             "evidence_id": evidence.get('evidence_id', ''),
             "id": evidence.get('hash', ''),
@@ -406,7 +382,6 @@ def retrieve_evidence(current_user):
             "created_at": evidence.get('timestamp', ''),
             "media_urls": evidence.get('mediaUrls', [])
         }
-
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -415,7 +390,6 @@ def retrieve_evidence(current_user):
         )
         conn.commit()
         conn.close()
-
         return jsonify(evidence_data), 200
     except Exception as e:
         logger.error(f"Failed to retrieve evidence by tx hash: {str(e)}")
@@ -429,7 +403,6 @@ def get_tx_hash(current_user):
         evidence_id = data.get('evidence_id')
         if evidence_id is None or not str(evidence_id).isdigit():
             return jsonify({"error": "Valid evidence ID is required"}), 400
-
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -438,10 +411,8 @@ def get_tx_hash(current_user):
         )
         result = c.fetchone()
         conn.close()
-
         if not result:
             return jsonify({"error": "No transaction hash found for evidence ID"}), 404
-
         return jsonify({
             "evidence_id": evidence_id,
             "tx_hash": result[0],
@@ -456,12 +427,10 @@ def get_tx_hash(current_user):
 def report(current_user, user_id):
     if str(current_user) != user_id:
         return jsonify({'error': 'Unauthorized access'}), 403
-
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
-
     c.execute('SELECT id, post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
     fetched = [{
         'id': r[0],
@@ -473,7 +442,6 @@ def report(current_user, user_id):
         'timestamp': r[6],
         'verified': r[7]
     } for r in c.fetchall()]
-
     c.execute('SELECT id, evidence_id, tx_hash, eth_tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
     stored = [{
         'id': r[0],
@@ -482,9 +450,7 @@ def report(current_user, user_id):
         'eth_tx_hash': r[3],
         'timestamp': r[4]
     } for r in c.fetchall()]
-
     conn.close()
-
     return jsonify({'username': username, 'fetched': fetched, 'stored': stored})
 
 @app.route('/report-stats/<user_id>', methods=['GET'])
@@ -492,16 +458,13 @@ def report(current_user, user_id):
 def report_stats(current_user, user_id):
     if str(current_user) != user_id:
         return jsonify({'error': 'Unauthorized access'}), 403
-
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-
     now = datetime.datetime.now()
     week_ago = now - timedelta(days=7)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
     yesterday_end = today_start - timedelta(seconds=1)
-
     def count(request_type, start, end=None):
         if end:
             c.execute(
@@ -514,16 +477,13 @@ def report_stats(current_user, user_id):
                 (user_id, request_type, start.isoformat())
             )
         return c.fetchone()[0]
-
     weekly_fetches = count('fetch', week_ago)
     weekly_retrievals = count('retrieval', week_ago)
     yesterday_fetches = count('fetch', yesterday_start, yesterday_end)
     yesterday_retrievals = count('retrieval', yesterday_start, yesterday_end)
     today_fetches = count('fetch', today_start)
     today_retrievals = count('retrieval', today_start)
-
     conn.close()
-
     return jsonify({
         'weekly': {'fetches': weekly_fetches, 'retrievals': weekly_retrievals},
         'daily': {
@@ -537,20 +497,15 @@ def report_stats(current_user, user_id):
 def generate_report(current_user, user_id):
     if str(current_user) != user_id:
         return jsonify({'error': 'Unauthorized access'}), 403
-
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
-
     c.execute('SELECT post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
     fetched = c.fetchall()
-
     c.execute('SELECT evidence_id, tx_hash, eth_tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
     stored = c.fetchall()
-
     conn.close()
-
     html_content = f"""
     <html>
     <head>
@@ -589,7 +544,6 @@ def generate_report(current_user, user_id):
     </body>
     </html>
     """
-
     pdf = pdfkit.from_string(html_content, False)
     response = make_response(pdf)
     response.headers['Content-Type'] = 'application/pdf'
