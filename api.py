@@ -596,5 +596,6 @@ def generate_report(current_user, user_id):
     response.headers['Content-Disposition'] = f'attachment; filename=forensic_report_{user_id}.pdf'
     return response
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
