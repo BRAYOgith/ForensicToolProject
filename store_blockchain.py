@@ -49,7 +49,7 @@ if not web3.is_address(contract_address):
     logger.error(f"Invalid contract address: {contract_address}")
     raise ValueError("Invalid CONTRACT_ADDRESS")
 
-abi_path = "C:/Projects/ForensicToolProject/build/contracts/EvidenceStorage.json"
+abi_path = "build/contracts/EvidenceStorage.json"
 try:
     with open(abi_path, "r") as f:
         contract_json = json.load(f)
