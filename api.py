@@ -113,7 +113,7 @@ def send_activation_email(email, token):
         print(f"\n=== ACTIVATION LINK FOR {email} ===\n{activation_link}\n========================================\n")
         return
 
-    activation_link = f"http://localhost:3000/activate?token={token}"
+    activation_link = f"https://forensictoolproject.onrender.com/activate?token={token}"
 
     url = "https://api.brevo.com/v3/smtp/email"
     payload = {
