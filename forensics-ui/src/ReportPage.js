@@ -36,7 +36,7 @@ function ReportPage() {
   const [loading, setLoading] = useState(true);
 
   const navigate = useNavigate();
-  const API_BASE = 'http://localhost:5000'; // Change to production Render URL later
+  const API_BASE = 'https://forensictoolproject.onrender.com';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
