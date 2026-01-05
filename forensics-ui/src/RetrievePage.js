@@ -11,7 +11,7 @@ function RetrievePage() {
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
-  const API_BASE = 'http://localhost:5000'; // Change to production Render URL later
+  const API_BASE = 'https://forensictoolproject.onrender.com';
 
   // Protected route check
   useEffect(() => {
