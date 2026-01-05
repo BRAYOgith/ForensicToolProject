@@ -109,11 +109,11 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 def send_activation_email(email, token):
     if not BREVO_API_KEY:
         logger.warning("BREVO_API_KEY not set — printing activation link to console for local testing")
-        activation_link = f"https://forensictoolproject.onrender.com/activate?token={token}"
+        activation_link = f"https://forensic-tool-project.vercel.app/activate?token={token}"
         print(f"\n=== ACTIVATION LINK FOR {email} ===\n{activation_link}\n========================================\n")
         return
 
-    activation_link = f"https://forensictoolproject.onrender.com/activate?token={token}"
+    activation_link = f"https://forensic-tool-project.vercel.app/activate?token={token}"
 
     url = "https://api.brevo.com/v3/smtp/email"
     payload = {
