@@ -1,8 +1,11 @@
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import requests
 import json
 from store_blockchain import store_evidence, get_evidence, get_evidence_by_tx_hash
+from dotenv import load_dotenv
 import os
 import logging
 import re
@@ -16,31 +19,32 @@ from bcrypt import gensalt, hashpw, checkpw
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
-logging.basicConfig(level=logging.INFO, filename='forensic.log')
+logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Updated CORS to allow live Vercel domain + localhost for development
-allowed_origins = [
-    "https://forensic-tool-project.vercel.app",  # Change if your Vercel URL is different
-    "http://localhost:3000"
-]
-CORS(app, resources={r"/*": {"origins": allowed_origins}})
+CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://forensic-tool-project.vercel.app"]}})
 
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key')
+load_dotenv()
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
 
-# Correct Hugging Face model repository
-MODEL_NAME = "Brayo44/chainforensix_defamation_model"
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+MODEL_PATH = "chainforensix_defamation_model"
 
 tokenizer = None
 model = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
-    logger.info(f"Loading defamation model from Hugging Face: {MODEL_NAME}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+    logger.info(f"Loading local defamation model from: {MODEL_PATH}")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
     model.to(device)
     model.eval()
     logger.info(f"Defamation model loaded on {device}")
@@ -50,18 +54,19 @@ except Exception as e:
 def predict_defamatory(text):
     if not tokenizer or not model:
         return {"is_defamatory": False, "confidence": 0.0}
-    # NEW: Quick keyword check to reduce false positives
+
     safe_keywords = ['congrat', 'congrats', 'well done', 'good', 'positive', 'welcome', 'happy', 'celebrate', 'victory', 'win', 'president', 'FA', 'years', '👌']
     if any(word in text.lower() for word in safe_keywords):
         logger.info("Safe keywords detected – lowering confidence")
         return {"is_defamatory": False, "confidence": 0.0}
+
     try:
         inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(device)
         with torch.no_grad():
             outputs = model(**inputs)
             prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
             confidence = float(prob[0][1].item())
-        is_defamatory = confidence >= 0.90 # NEW: Raised threshold to 0.90
+        is_defamatory = confidence >= 0.90
         return {"is_defamatory": is_defamatory, "confidence": round(confidence, 4)}
     except Exception as e:
         logger.error(f"Prediction error: {e}")
@@ -74,13 +79,72 @@ if not bearer_token:
 
 headers = {"Authorization": f"Bearer {bearer_token}"}
 
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+
+def send_activation_email(email, token):
+    if not BREVO_API_KEY:
+        logger.warning("BREVO_API_KEY not set — printing activation link to console for local testing")
+        activation_link = f"http://localhost:3000/activate?token={token}"
+        print(f"\n=== ACTIVATION LINK FOR {email} ===\n{activation_link}\n========================================\n")
+        return
+
+    activation_link = f"http://localhost:3000/activate?token={token}"
+
+    url = "https://api.brevo.com/v3/smtp/email"
+    payload = {
+        "sender": {
+            "name": "Forensic Tool",
+            "email": "briannjoki619@gmail.com"
+        },
+        "to": [{"email": email}],
+        "subject": "Activate Your Forensic Tool Account",
+        "htmlContent": f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;">
+            <div style="background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center;">
+                <h1 style="color: #1a73e8; font-size: 28px;">Forensic Tool</h1>
+                <h2 style="color: #333; margin: 30px 0;">Welcome!</h2>
+                <p style="font-size: 18px; color: #555; line-height: 1.6;">
+                    Please click the button below to activate your account.
+                </p>
+                <a href="{activation_link}" 
+                   style="display: inline-block; margin: 30px 0; padding: 16px 32px; background: #1a73e8; color: white; text-decoration: none; font-weight: bold; font-size: 18px; border-radius: 8px;">
+                    Activate My Account
+                </a>
+                <p style="color: #777; font-size: 14px; margin-top: 40px;">
+                    This link expires in 1 hour.<br>
+                    If you didn't register, please ignore this email.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+    }
+
+    headers = {
+        "accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "content-type": "application/json"
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code in [200, 201]:
+            logger.info(f"Activation email successfully sent to {email}")
+        else:
+            logger.error(f"Brevo error {response.status_code}: {response.text}")
+    except Exception as e:
+        logger.error(f"Failed to send activation email: {e}")
+
 def init_db():
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        email TEXT,
+        is_active INTEGER DEFAULT 0
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS fetched_evidence (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,36 +174,20 @@ def init_db():
         timestamp TEXT,
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
+    c.execute('PRAGMA table_info(users)')
+    columns = [row[1] for row in c.fetchall()]
+    if 'is_active' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 0')
+    if 'email' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN email TEXT')
     c.execute('PRAGMA table_info(fetched_evidence)')
     columns = [row[1] for row in c.fetchall()]
     if 'verified' not in columns:
         c.execute('ALTER TABLE fetched_evidence ADD COLUMN verified INTEGER')
-        logger.info("Added 'verified' column to fetched_evidence")
-    if 'is_defamatory' in columns or 'confidence' in columns:
-        logger.info("Recreating fetched_evidence to remove is_defamatory and confidence")
-        c.execute('''CREATE TABLE fetched_evidence_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            post_id TEXT,
-            content TEXT,
-            author_username TEXT,
-            created_at TEXT,
-            media_urls TEXT,
-            timestamp TEXT,
-            verified INTEGER,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )''')
-        c.execute('''INSERT INTO fetched_evidence_new (
-            id, user_id, post_id, content, author_username, created_at, media_urls, timestamp, verified
-        ) SELECT id, user_id, post_id, content, author_username, created_at, media_urls, timestamp, verified
-        FROM fetched_evidence''')
-        c.execute('DROP TABLE fetched_evidence')
-        c.execute('ALTER TABLE fetched_evidence_new RENAME TO fetched_evidence')
     c.execute('PRAGMA table_info(stored_evidence)')
     columns = [row[1] for row in c.fetchall()]
     if 'eth_tx_hash' not in columns:
         c.execute('ALTER TABLE stored_evidence ADD COLUMN eth_tx_hash TEXT')
-        logger.info("Added 'eth_tx_hash' column to stored_evidence")
     conn.commit()
     conn.close()
 
@@ -155,8 +203,17 @@ def token_required(f):
             token = token.split(' ')[1]
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
             current_user = data['user_id']
+            conn = sqlite3.connect('forensic.db')
+            c = conn.cursor()
+            c.execute('SELECT is_active FROM users WHERE id = ?', (current_user,))
+            result = c.fetchone()
+            conn.close()
+            if not result or result[0] == 0:
+                return jsonify({'error': 'Account not activated. Please check your email for activation link.'}), 403
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired'}), 401
         except Exception:
-            return jsonify({'error': 'Token is invalid'}), 401
+            return jsonify({'error': 'Invalid token'}), 401
         return f(current_user, *args, **kwargs)
     return decorated
 
@@ -173,21 +230,23 @@ def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    if not username or not password:
-        return jsonify({'error': 'Username and password are required'}), 400
+    email = data.get('email')
+    if not username or not password or not email:
+        return jsonify({'error': 'Username, password, and email are required'}), 400
     hashed = hashpw(password.encode('utf-8'), gensalt())
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     try:
-        c.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashed))
-        conn.commit()
+        c.execute('INSERT INTO users (username, password, email, is_active) VALUES (?, ?, ?, 0)', (username, hashed, email))
         user_id = c.lastrowid
-        token = jwt.encode({
+        conn.commit()
+        activation_token = jwt.encode({
             'user_id': user_id,
-            'exp': datetime.datetime.utcnow() + timedelta(hours=24)
+            'exp': datetime.datetime.utcnow() + timedelta(hours=1)
         }, app.config['SECRET_KEY'])
+        send_activation_email(email, activation_token)
         conn.close()
-        return jsonify({'token': token, 'user_id': user_id}), 201
+        return jsonify({'message': 'Registration successful. Please check your email to activate your account.'}), 201
     except sqlite3.IntegrityError:
         conn.close()
         return jsonify({'error': 'Username already exists'}), 400
@@ -195,37 +254,165 @@ def register():
         conn.close()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/activate', methods=['GET'])
+def activate():
+    token = request.args.get('token')
+    if not token:
+        return "<h2 style='color:red;'>Invalid activation link — missing token</h2>", 400
+
+    try:
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        user_id = data['user_id']
+
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('SELECT is_active FROM users WHERE id = ?', (user_id,))
+        result = c.fetchone()
+
+        if not result:
+            conn.close()
+            return "<h2 style='color:red;'>Invalid user</h2>", 400
+
+        if result[0] == 1:
+            conn.close()
+            return """
+            <div style="text-align:center; padding:50px; font-family:Arial;">
+                <h1 style="color:green;">Account Already Activated!</h1>
+                <p>You can now log in.</p>
+                <a href="http://localhost:3000/login" style="color:#1a73e8;">Go to Login →</a>
+            </div>
+            """, 200
+
+        c.execute('UPDATE users SET is_active = 1 WHERE id = ?', (user_id,))
+        conn.commit()
+        logger.info(f"User ID {user_id} activated successfully")
+        conn.close()
+
+        return """
+        <div style="text-align:center; padding:50px; font-family:Arial;">
+            <h1 style="color:green;">Account Activated Successfully!</h1>
+            <p>You can now log in to Forensic Tool.</p>
+            <a href="http://localhost:3000/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
+        </div>
+        """, 200
+
+    except jwt.ExpiredSignatureError:
+        return "<h2 style='color:red;'>Activation link expired. Please request a new one from login page.</h2>", 400
+    except Exception as e:
+        logger.error(f"Activation failed: {e}")
+        return "<h2 style='color:red;'>Activation failed. Please try again.</h2>", 500
+
+@app.route('/resend-activation', methods=['POST'])
+def resend_activation():
+    data = request.get_json()
+    email = data.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT id FROM users WHERE email = ? AND is_active = 0', (email,))
+    user = c.fetchone()
+    conn.close()
+
+    if not user:
+        return jsonify({'error': 'No inactive account found with this email'}), 404
+
+    token = jwt.encode({
+        'user_id': user[0],
+        'exp': datetime.datetime.utcnow() + timedelta(hours=1)
+    }, app.config['SECRET_KEY'])
+
+    send_activation_email(email, token)
+    return jsonify({'message': 'New activation link sent! Check your inbox and spam folder.'}), 200
+
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('SELECT id, password FROM users WHERE username = ?', (username,))
+    c.execute('SELECT id, password, is_active FROM users WHERE username = ?', (username,))
     user = c.fetchone()
     conn.close()
-    if user and checkpw(password.encode('utf-8'), user[1]):
-        token = jwt.encode({
-            'user_id': user[0],
-            'exp': datetime.datetime.utcnow() + timedelta(hours=24)
-        }, app.config['SECRET_KEY'])
-        return jsonify({'token': token, 'user_id': user[0]})
-    return jsonify({'error': 'Invalid credentials'}), 401
+
+    if not user:
+        return jsonify({'error': 'Invalid username or password'}), 401
+
+    if not checkpw(password.encode('utf-8'), user[1]):
+        return jsonify({'error': 'Invalid username or password'}), 401
+
+    if user[2] == 0:
+        return jsonify({'error': 'Account not activated. Please check your email for activation link.'}), 403
+
+    token = jwt.encode({
+        'user_id': user[0],
+        'exp': datetime.datetime.utcnow() + timedelta(hours=24)
+    }, app.config['SECRET_KEY'])
+
+    return jsonify({'token': token, 'user_id': user[0]}), 200
+
+@app.route('/search-x-posts', methods=['POST'])
+@token_required
+@limiter.limit("20 per hour")
+def search_x_posts(current_user):
+    data = request.get_json()
+    query = data.get('query')
+    if not query:
+        return jsonify({"error": "Search query is required"}), 400
+    search_url = f"https://api.x.com/2/tweets/search/recent?query={requests.utils.quote(query)}&tweet.fields=created_at,author_id&expansions=author_id&user.fields=username&max_results=10"
+    response = requests.get(search_url, headers=headers)
+    if response.status_code != 200:
+        return jsonify({"error": "X search failed", "details": response.text}), response.status_code
+    results = response.json()
+    posts = []
+    if 'data' in results:
+        for tweet in results['data']:
+            author = next((u['username'] for u in results.get('includes', {}).get('users', []) if u['id'] == tweet['author_id']), 'unknown')
+            posts.append({
+                "post_id": tweet['id'],
+                "text": tweet['text'],
+                "author_username": author,
+                "created_at": tweet['created_at']
+            })
+    return jsonify({"posts": posts})
 
 @app.route('/fetch-x-post', methods=['POST'])
 @token_required
+@limiter.limit("20 per hour")
 def fetch_x_post(current_user):
     try:
         data = request.get_json()
         post_id = data.get('post_id')
         input_text = data.get('input_text', '')
-        if not post_id:
-            return jsonify({"error": "Post ID is required"}), 400
+
+        if not post_id and not input_text:
+            return jsonify({"error": "Either post_id or input_text is required"}), 400
+
+        if not post_id and input_text:
+            search_resp = requests.post(
+                'http://localhost:5000/search-x-posts',
+                json={'query': input_text},
+                headers={'Authorization': request.headers.get('Authorization')}
+            )
+            if search_resp.status_code != 200:
+                return jsonify({"error": "Text search failed"}), 500
+            search_data = search_resp.json()
+            if not search_data.get('posts'):
+                return jsonify({"error": "No posts found matching the text"}), 404
+            post_id = search_data['posts'][0]['post_id']
+
         url = f"https://api.x.com/2/tweets/{post_id}?expansions=author_id,attachments.media_keys&user.fields=username&tweet.fields=created_at,entities,attachments&media.fields=media_key,type,url"
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             return jsonify({"error": f"Failed to fetch post: {response.text}"}), response.status_code
+
         response_data = response.json()
         tweet_data = response_data.get('data', {})
         tweet_text = tweet_data.get('text', '')
@@ -234,16 +421,19 @@ def fetch_x_post(current_user):
         created_at = tweet_data.get('created_at', '')
         author_id = tweet_data.get('author_id', '')
         expanded_text = expand_urls(tweet_text, urls)
+
         users = response_data.get('includes', {}).get('users', [])
         author_username = next((user['username'] for user in users if user['id'] == author_id), '')
+
         media_urls = []
         media = response_data.get('includes', {}).get('media', [])
         for media_item in media:
             if media_item.get('type') == 'photo' and media_item.get('url'):
                 media_urls.append(media_item['url'])
-        # NEW: Defamation scan
+
         defamation_result = predict_defamatory(expanded_text)
         logger.info(f"Defamation scan for post {post_id}: {defamation_result}")
+
         post_data = {
             "id": post_id,
             "text": expanded_text,
@@ -252,8 +442,9 @@ def fetch_x_post(current_user):
             "author_id": author_id,
             "media_urls": media_urls,
             "input_text": input_text,
-            "defamation": defamation_result # NEW: Return AI result
+            "defamation": defamation_result
         }
+
         if input_text:
             normalized_input = re.sub(r'\s+', ' ', input_text.strip().lower())
             normalized_fetched = re.sub(r'\s+', ' ', expanded_text.strip().lower())
@@ -263,6 +454,7 @@ def fetch_x_post(current_user):
                 post_data["text"] = input_text
         else:
             verified = None
+
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -270,13 +462,13 @@ def fetch_x_post(current_user):
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (current_user, post_id, expanded_text, author_username, created_at, json.dumps(media_urls), datetime.datetime.now().isoformat(), verified)
         )
-        evidence_db_id = c.lastrowid
         c.execute(
             'INSERT INTO requests_log (user_id, request_type, timestamp) VALUES (?, ?, ?)',
             (current_user, 'fetch', datetime.datetime.now().isoformat())
         )
         conn.commit()
         conn.close()
+
         return jsonify(post_data), 200
     except Exception as e:
         logger.error(f"Error in fetch_x_post: {str(e)}")
@@ -284,6 +476,7 @@ def fetch_x_post(current_user):
 
 @app.route('/store-evidence', methods=['POST'])
 @token_required
+@limiter.limit("20 per hour")
 def store_evidence_endpoint(current_user):
     try:
         data = request.get_json()
@@ -292,24 +485,32 @@ def store_evidence_endpoint(current_user):
         if not evidence_data:
             logger.error("Evidence data is required")
             return jsonify({"error": "Evidence data is required"}), 400
+
         if isinstance(evidence_data, str):
             evidence_data = json.loads(evidence_data)
+
+        defamation = evidence_data.get("defamation", {"is_defamatory": False, "confidence": 0.0})
+
         evidence_for_blockchain = {
             "hash": evidence_data.get("id", ""),
             "timestamp": evidence_data.get("created_at", datetime.datetime.now().isoformat()),
             "investigator": str(current_user),
             "content": evidence_data.get("content", ""),
             "author_username": evidence_data.get("author_username", ""),
-            "mediaUrls": evidence_data.get("media_urls", [])
+            "mediaUrls": evidence_data.get("media_urls", []),
+            "defamation": defamation
         }
         logger.info(f"Sending to blockchain: {evidence_for_blockchain}")
+
         result = store_evidence(json.dumps(evidence_for_blockchain))
         if not result or result.get('evidence_id') == -1:
             logger.error(f"Failed to store evidence: {result}")
             return jsonify({"error": "Failed to store evidence on blockchain"}), 500
+
         tx_hash = result['tx_hash']
         eth_tx_hash = result['eth_tx_hash']
         evidence_id = result['evidence_id']
+
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -318,6 +519,7 @@ def store_evidence_endpoint(current_user):
         )
         conn.commit()
         conn.close()
+
         return jsonify({
             "evidence_id": evidence_id,
             "tx_hash": tx_hash,
@@ -335,17 +537,21 @@ def get_evidence_endpoint(current_user):
         evidence_id = data.get('evidence_id')
         if evidence_id is None or not str(evidence_id).isdigit():
             return jsonify({"error": "Valid evidence ID is required"}), 400
+
         evidence = get_evidence(int(evidence_id))
         if not evidence:
             return jsonify({"error": "Evidence not found"}), 404
+
         evidence_data = {
             "id": evidence.get('hash', ''),
             "text": evidence.get('content', ''),
             "author_username": evidence.get('author_username', ''),
             "investigator": evidence.get('investigator', ''),
             "created_at": evidence.get('timestamp', ''),
-            "media_urls": evidence.get('mediaUrls', [])
+            "media_urls": evidence.get('mediaUrls', []),
+            "defamation": evidence.get('defamation', {"is_defamatory": False, "confidence": 0.0})
         }
+
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -354,6 +560,7 @@ def get_evidence_endpoint(current_user):
         )
         conn.commit()
         conn.close()
+
         return jsonify({"evidence_id": evidence_id, "data": evidence_data}), 200
     except Exception as e:
         logger.error(f"Failed to retrieve evidence: {str(e)}")
@@ -367,12 +574,15 @@ def retrieve_evidence(current_user):
         tx_hash = data.get('transaction_hash')
         if not tx_hash:
             return jsonify({"error": "Transaction hash is required"}), 400
+
         normalized_tx_hash = tx_hash if tx_hash.startswith('0x') else f'0x{tx_hash}'
         if len(normalized_tx_hash) != 66 or not re.match(r'^0x[0-9a-fA-F]{64}$', normalized_tx_hash):
             return jsonify({"error": "Invalid transaction hash format"}), 400
+
         evidence = get_evidence_by_tx_hash(normalized_tx_hash)
         if not evidence:
             return jsonify({"error": "Evidence not found for transaction hash"}), 404
+
         evidence_data = {
             "evidence_id": evidence.get('evidence_id', ''),
             "id": evidence.get('hash', ''),
@@ -380,8 +590,10 @@ def retrieve_evidence(current_user):
             "author_username": evidence.get('author_username', ''),
             "investigator": evidence.get('investigator', ''),
             "created_at": evidence.get('timestamp', ''),
-            "media_urls": evidence.get('mediaUrls', [])
+            "media_urls": evidence.get('mediaUrls', []),
+            "defamation": evidence.get('defamation', {"is_defamatory": False, "confidence": 0.0})
         }
+
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -390,6 +602,7 @@ def retrieve_evidence(current_user):
         )
         conn.commit()
         conn.close()
+
         return jsonify(evidence_data), 200
     except Exception as e:
         logger.error(f"Failed to retrieve evidence by tx hash: {str(e)}")
@@ -403,6 +616,7 @@ def get_tx_hash(current_user):
         evidence_id = data.get('evidence_id')
         if evidence_id is None or not str(evidence_id).isdigit():
             return jsonify({"error": "Valid evidence ID is required"}), 400
+
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -411,8 +625,10 @@ def get_tx_hash(current_user):
         )
         result = c.fetchone()
         conn.close()
+
         if not result:
             return jsonify({"error": "No transaction hash found for evidence ID"}), 404
+
         return jsonify({
             "evidence_id": evidence_id,
             "tx_hash": result[0],
@@ -427,10 +643,12 @@ def get_tx_hash(current_user):
 def report(current_user, user_id):
     if str(current_user) != user_id:
         return jsonify({'error': 'Unauthorized access'}), 403
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
+
     c.execute('SELECT id, post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
     fetched = [{
         'id': r[0],
@@ -442,6 +660,7 @@ def report(current_user, user_id):
         'timestamp': r[6],
         'verified': r[7]
     } for r in c.fetchall()]
+
     c.execute('SELECT id, evidence_id, tx_hash, eth_tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
     stored = [{
         'id': r[0],
@@ -450,7 +669,9 @@ def report(current_user, user_id):
         'eth_tx_hash': r[3],
         'timestamp': r[4]
     } for r in c.fetchall()]
+
     conn.close()
+
     return jsonify({'username': username, 'fetched': fetched, 'stored': stored})
 
 @app.route('/report-stats/<user_id>', methods=['GET'])
@@ -458,13 +679,16 @@ def report(current_user, user_id):
 def report_stats(current_user, user_id):
     if str(current_user) != user_id:
         return jsonify({'error': 'Unauthorized access'}), 403
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
+
     now = datetime.datetime.now()
     week_ago = now - timedelta(days=7)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
     yesterday_end = today_start - timedelta(seconds=1)
+
     def count(request_type, start, end=None):
         if end:
             c.execute(
@@ -477,13 +701,16 @@ def report_stats(current_user, user_id):
                 (user_id, request_type, start.isoformat())
             )
         return c.fetchone()[0]
+
     weekly_fetches = count('fetch', week_ago)
     weekly_retrievals = count('retrieval', week_ago)
     yesterday_fetches = count('fetch', yesterday_start, yesterday_end)
     yesterday_retrievals = count('retrieval', yesterday_start, yesterday_end)
     today_fetches = count('fetch', today_start)
     today_retrievals = count('retrieval', today_start)
+
     conn.close()
+
     return jsonify({
         'weekly': {'fetches': weekly_fetches, 'retrievals': weekly_retrievals},
         'daily': {
@@ -497,15 +724,20 @@ def report_stats(current_user, user_id):
 def generate_report(current_user, user_id):
     if str(current_user) != user_id:
         return jsonify({'error': 'Unauthorized access'}), 403
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
+
     c.execute('SELECT post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
     fetched = c.fetchall()
+
     c.execute('SELECT evidence_id, tx_hash, eth_tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
     stored = c.fetchall()
+
     conn.close()
+
     html_content = f"""
     <html>
     <head>
@@ -544,12 +776,13 @@ def generate_report(current_user, user_id):
     </body>
     </html>
     """
+
     pdf = pdfkit.from_string(html_content, False)
     response = make_response(pdf)
     response.headers['Content-Type'] = 'application/pdf'
     response.headers['Content-Disposition'] = f'attachment; filename=forensic_report_{user_id}.pdf'
     return response
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)
