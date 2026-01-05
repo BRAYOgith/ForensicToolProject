@@ -109,7 +109,7 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 def send_activation_email(email, token):
     if not BREVO_API_KEY:
         logger.warning("BREVO_API_KEY not set — printing activation link to console for local testing")
-        activation_link = f"http://localhost:3000/activate?token={token}"
+        activation_link = f"https://forensictoolproject.onrender.com/activate?token={token}"
         print(f"\n=== ACTIVATION LINK FOR {email} ===\n{activation_link}\n========================================\n")
         return
 
@@ -304,7 +304,7 @@ def activate():
             <div style="text-align:center; padding:50px; font-family:Arial;">
                 <h1 style="color:green;">Account Already Activated!</h1>
                 <p>You can now log in.</p>
-                <a href="http://localhost:3000/login" style="color:#1a73e8;">Go to Login →</a>
+                <a href="https://forensic-tool-project.vercel.app/login" style="color:#1a73e8;">Go to Login →</a>
             </div>
             """, 200
 
@@ -317,7 +317,7 @@ def activate():
         <div style="text-align:center; padding:50px; font-family:Arial;">
             <h1 style="color:green;">Account Activated Successfully!</h1>
             <p>You can now log in to Forensic Tool.</p>
-            <a href="http://localhost:3000/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
+            <a href="https://forensic-tool-project.vercel.app/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
         </div>
         """, 200
 
