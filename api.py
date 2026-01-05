@@ -24,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
+        "status": "online",
+        "message": "Forensic Tool Backend is Running Successfully!",
+        "service": "ForensicToolProject"
+    }), 200
+
 CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://forensic-tool-project.vercel.app"]}})
 
 load_dotenv()
