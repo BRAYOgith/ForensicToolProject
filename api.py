@@ -43,31 +43,37 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-MODEL_PATH = "Brayo44/chainforensix_defamation_model"
-
+MODEL_PATH = "Brayo44/chainforensix_defamation_model"  
 tokenizer = None
 model = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-try:
-    logger.info(f"Loading local defamation model from: {MODEL_PATH}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-    model.to(device)
-    model.eval()
-    logger.info(f"Defamation model loaded on {device}")
-except Exception as e:
-    logger.warning(f"Defamation model not loaded: {e}")
-
+def load_model():
+    """Loads the model only when needed (Lazy Loading)"""
+    global tokenizer, model
+    if model is not None:
+        return  # Already loaded
+    try:
+        logger.info(f"Loading defamation model from: {MODEL_PATH}")
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+        model.to(device)
+        model.eval()
+        logger.info(f"Defamation model loaded on {device}")
+    except Exception as e:
+        logger.warning(f"Failed to load defamation model: {e}")
+        
 def predict_defamatory(text):
+    
+    if not model:
+        load_model()
+    
+    
     if not tokenizer or not model:
         return {"is_defamatory": False, "confidence": 0.0}
-
     safe_keywords = ['congrat', 'congrats', 'well done', 'good', 'positive', 'welcome', 'happy', 'celebrate', 'victory', 'win', 'president', 'FA', 'years', '👌']
     if any(word in text.lower() for word in safe_keywords):
         logger.info("Safe keywords detected – lowering confidence")
         return {"is_defamatory": False, "confidence": 0.0}
-
     try:
         inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(device)
         with torch.no_grad():
