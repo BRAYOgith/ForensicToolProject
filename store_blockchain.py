@@ -49,14 +49,94 @@ if not web3.is_address(contract_address):
     logger.error(f"Invalid contract address: {contract_address}")
     raise ValueError("Invalid CONTRACT_ADDRESS")
 
-abi_path = "build/contracts/EvidenceStorage.json"
-try:
-    with open(abi_path, "r") as f:
-        contract_json = json.load(f)
-        contract_abi = contract_json["abi"]
-except Exception as e:
-    logger.error(f"Error loading ABI: {str(e)}")
-    raise
+# REMOVED HARD-CODED WINDOWS PATH
+# Embedded current ABI — safe for localhost and Render
+# This is your current contract ABI (before AI fields)
+contract_abi = [
+    {
+        "inputs": [],
+        "name": "evidenceCount",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "name": "evidences",
+        "outputs": [
+            {"internalType": "bytes32", "name": "hash", "type": "bytes32"},
+            {"internalType": "string", "name": "timestamp", "type": "string"},
+            {"internalType": "string", "name": "investigator", "type": "string"},
+            {"internalType": "string", "name": "content", "type": "string"},
+            {"internalType": "string", "name": "author_username", "type": "string"},
+            {"internalType": "string[]", "name": "mediaUrls", "type": "string[]"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "name": "txHashToIndex",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
+            {"internalType": "string", "name": "timestamp", "type": "string"},
+            {"internalType": "string", "name": "investigator", "type": "string"},
+            {"internalType": "string", "name": "content", "type": "string"},
+            {"internalType": "string", "name": "author_username", "type": "string"},
+            {"internalType": "string[]", "name": "mediaUrls", "type": "string[]"}
+        ],
+        "name": "storeEvidence",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "index", "type": "uint256"}],
+        "name": "getEvidence",
+        "outputs": [
+            {"internalType": "bytes32", "name": "", "type": "bytes32"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string[]", "name": "", "type": "string[]"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "txHash", "type": "bytes32"}],
+        "name": "getEvidenceByTxHash",
+        "outputs": [
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "bytes32", "name": "", "type": "bytes32"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string", "name": "", "type": "string"},
+            {"internalType": "string[]", "name": "", "type": "string[]"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "uint256", "name": "index", "type": "uint256"},
+            {"indexed": True, "internalType": "bytes32", "name": "txHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "string", "name": "timestamp", "type": "string"},
+            {"indexed": False, "internalType": "string", "name": "investigator", "type": "string"}
+        ],
+        "name": "EvidenceStored",
+        "type": "event"
+    }
+]
 
 contract = web3.eth.contract(
     address=web3.to_checksum_address(contract_address),
