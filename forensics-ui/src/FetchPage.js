@@ -10,7 +10,7 @@ function FetchPage() {
   const [storedResult, setStoredResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const API_BASE = 'http://localhost:5000'; // Change to production Render URL later
+  const API_BASE = 'https://forensictoolproject.onrender.com';
 
   const handleFetchPost = async (e) => {
     e.preventDefault();
