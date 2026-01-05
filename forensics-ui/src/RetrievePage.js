@@ -11,15 +11,13 @@ function RetrievePage() {
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
+  const API_BASE = 'http://localhost:5000'; // Change to production Render URL later
 
-  // LIVE BACKEND URL
-  const API_BASE = 'https://forensictoolprojectfin.onrender.com';
-
-  // Session Management: Redirect to login if not authenticated
+  // Protected route check
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
-      navigate('/login', { replace: true });
+      navigate('/login');
     }
   }, [navigate]);
 
@@ -32,21 +30,24 @@ function RetrievePage() {
       return;
     }
 
-    const normalized = txHash.trim().toLowerCase().startsWith('0x') ? txHash.trim() : `0x${txHash.trim()}`;
-    if (!/^0x[0-9a-fA-F]{64}$/i.test(normalized)) {
-      setStatus('Invalid transaction hash format (must be 66 characters: 0x + 64 hex)');
+    const normalized = txHash.trim().toLowerCase();
+    const fullHash = normalized.startsWith('0x') ? normalized : `0x${normalized}`;
+
+    if (!/^0x[0-9a-f]{64}$/i.test(fullHash)) {
+      setStatus('Invalid transaction hash format (must be 66 chars: 0x + 64 hex)');
       setEvidenceId('');
       setEthTxHash('');
       return;
     }
 
-    const lookupEvidenceId = async () => {
-      setStatus('Looking up evidence ID from transaction hash...');
+    const lookupId = async () => {
+      setStatus('Looking up Evidence ID from transaction hash...');
+      setLoading(true);
       try {
         const token = localStorage.getItem('token');
         const response = await axios.post(
           `${API_BASE}/retrieve-evidence`,
-          { transaction_hash: normalized },
+          { transaction_hash: fullHash },
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -58,17 +59,18 @@ function RetrievePage() {
           setEvidenceId(response.data.evidence_id?.toString() || '');
           setEthTxHash(response.data.eth_tx_hash || '');
           setRetrievedEvidence(response.data);
-          setStatus('Evidence ID found from transaction hash');
+          setStatus('Evidence found by transaction hash');
         }
       } catch (error) {
-        const msg = error.response?.data?.error || error.message;
-        setStatus(`Failed to lookup from tx hash: ${msg}`);
+        setStatus(`Lookup failed: ${error.response?.data?.error || error.message}`);
         setEvidenceId('');
         setEthTxHash('');
+      } finally {
+        setLoading(false);
       }
     };
 
-    const timer = setTimeout(lookupEvidenceId, 600);
+    const timer = setTimeout(lookupId, 600);
     return () => clearTimeout(timer);
   }, [txHash]);
 
@@ -80,8 +82,9 @@ function RetrievePage() {
       return;
     }
 
-    const lookupTxHash = async () => {
-      setStatus('Looking up transaction hash from evidence ID...');
+    const lookupHash = async () => {
+      setStatus('Looking up transaction hash from Evidence ID...');
+      setLoading(true);
       try {
         const token = localStorage.getItem('token');
         const response = await axios.post(
@@ -100,31 +103,33 @@ function RetrievePage() {
           setStatus('Transaction hash found');
         }
       } catch (error) {
-        const msg = error.response?.data?.error || error.message;
-        setStatus(`Failed to lookup tx hash: ${msg}`);
+        setStatus(`Lookup failed: ${error.response?.data?.error || error.message}`);
         setTxHash('');
         setEthTxHash('');
+      } finally {
+        setLoading(false);
       }
     };
 
-    const timer = setTimeout(lookupTxHash, 600);
+    const timer = setTimeout(lookupHash, 600);
     return () => clearTimeout(timer);
   }, [evidenceId]);
 
   const handleRetrieve = async (e) => {
     e.preventDefault();
+
     if (!evidenceId.trim() && !txHash.trim()) {
-      setStatus('Please enter either an Evidence ID or Transaction Hash');
+      setStatus('Please enter either Evidence ID or Transaction Hash');
       return;
     }
 
     setLoading(true);
     setRetrievedEvidence(null);
 
-    const token = localStorage.getItem('token');
-    const headers = { Authorization: `Bearer ${token}` };
-
     try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+
       let response;
       if (evidenceId.trim() && !isNaN(evidenceId)) {
         setStatus('Retrieving evidence by ID...');
@@ -134,26 +139,24 @@ function RetrievePage() {
           { headers }
         );
       } else {
-        const normalized = txHash.trim().toLowerCase().startsWith('0x') ? txHash.trim() : `0x${txHash.trim()}`;
+        const fullHash = txHash.trim().toLowerCase().startsWith('0x') ? txHash.trim() : `0x${txHash.trim()}`;
         setStatus('Retrieving evidence by transaction hash...');
         response = await axios.post(
           `${API_BASE}/retrieve-evidence`,
-          { transaction_hash: normalized },
+          { transaction_hash: fullHash },
           { headers }
         );
       }
 
       if (response.data.error) {
         setStatus(`Error: ${response.data.error}`);
-        setRetrievedEvidence(null);
       } else {
-        setRetrievedEvidence(response.data.data || response.data);
-        setStatus('Evidence successfully retrieved from blockchain');
+        const data = response.data.data || response.data;
+        setRetrievedEvidence(data);
+        setStatus('Evidence retrieved successfully from blockchain');
       }
     } catch (error) {
-      const msg = error.response?.data?.error || error.message || 'Network error';
-      setStatus(`Retrieval failed: ${msg}`);
-      setRetrievedEvidence(null);
+      setStatus(`Error: ${error.response?.data?.error || error.message}`);
     } finally {
       setLoading(false);
     }
@@ -166,14 +169,14 @@ function RetrievePage() {
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
       <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow-xl rounded-xl p-8">
-          <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">
+        <div className="bg-white shadow-2xl rounded-2xl p-8">
+          <h2 className="text-3xl font-bold text-center text-gray-800 mb-10">
             Retrieve Evidence from Blockchain
           </h2>
 
-          <form onSubmit={handleRetrieve} className="space-y-6">
+          <form onSubmit={handleRetrieve} className="space-y-8">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-lg font-medium text-gray-700 mb-3">
                 Evidence ID (numeric)
               </label>
               <input
@@ -181,93 +184,101 @@ function RetrievePage() {
                 value={evidenceId}
                 onChange={(e) => setEvidenceId(e.target.value)}
                 placeholder="e.g., 1, 2, 3..."
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full px-5 py-4 text-lg border border-gray-300 rounded-xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition"
               />
             </div>
 
             <div className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Contract Transaction Hash
+              <label className="block text-lg font-medium text-gray-700 mb-3">
+                Or Transaction Hash
               </label>
               <input
                 type="text"
                 value={txHash}
                 onChange={(e) => setTxHash(e.target.value)}
                 placeholder="e.g., 0xabc123... (66 characters)"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full px-5 py-4 text-lg border border-gray-300 rounded-xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading || (!evidenceId.trim() && !txHash.trim())}
-              className="w-full bg-purple-600 text-white font-bold py-3 rounded-lg hover:bg-purple-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-gradient-to-r from-purple-600 to-indigo-700 text-white font-bold text-xl py-5 rounded-2xl hover:from-purple-700 hover:to-indigo-800 transition shadow-xl disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {loading ? 'Retrieving...' : 'Retrieve Evidence'}
+              {loading ? 'Retrieving from Blockchain...' : 'Retrieve Evidence'}
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-gray-600">Status: {status}</p>
+          <p className="mt-8 text-center text-xl font-medium text-gray-700">
+            Status: <span className="text-purple-700 font-bold">{status}</span>
+          </p>
 
           {retrievedEvidence && (
-            <div className="mt-10 p-6 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl shadow-lg border">
+            <div className="mt-12 p-10 bg-gradient-to-br from-purple-50 to-indigo-100 rounded-3xl shadow-2xl border-2 border-purple-200">
               {defamation && (
                 <div
-                  className={`mb-6 p-5 rounded-xl text-white font-bold text-center text-2xl shadow-lg ${
+                  className={`mb-10 p-8 rounded-3xl text-white font-extrabold text-center text-3xl shadow-2xl tracking-wide ${
                     isDefamatory ? 'bg-red-600' : 'bg-green-600'
                   }`}
                 >
                   {isDefamatory
                     ? `⚠️ DEFAMATORY CONTENT DETECTED – ${(confidence * 100).toFixed(1)}% CONFIDENCE`
-                    : `✅ NO DEFAMATION – ${(confidence * 100).toFixed(1)}% CONFIDENCE`}
+                    : `✅ NO DEFAMATION FOUND – ${(confidence * 100).toFixed(1)}% CONFIDENCE`}
                 </div>
               )}
 
-              <h3 className="text-2xl font-bold text-gray-800 mb-5 text-center">
-                Retrieved Evidence
+              <h3 className="text-3xl font-bold text-center text-gray-800 mb-8">
+                Immutable Evidence from Blockchain
               </h3>
 
-              <div className="grid md:grid-cols-2 gap-4 text-sm">
-                <p><strong>Evidence ID:</strong> {retrievedEvidence.evidence_id || retrievedEvidence.id || 'N/A'}</p>
-                <p><strong>Post ID:</strong> {retrievedEvidence.id || 'N/A'}</p>
-                <p><strong>Author:</strong> @{retrievedEvidence.author_username || 'N/A'}</p>
-                <p><strong>Investigator:</strong> {retrievedEvidence.investigator || 'N/A'}</p>
-                <p><strong>Timestamp:</strong> {retrievedEvidence.created_at || retrievedEvidence.timestamp || 'N/A'}</p>
-              </div>
-
-              <div className="mt-4">
-                <p className="font-medium text-gray-800 mb-2"><strong>Content:</strong></p>
-                <p className="bg-white p-4 rounded-lg border shadow-sm break-words">
-                  {retrievedEvidence.text || retrievedEvidence.content || 'No content'}
-                </p>
-              </div>
-
-              {ethTxHash && (
-                <div className="mt-5 text-center">
-                  <p className="font-medium text-gray-700">Ethereum Transaction:</p>
-                  <a
-                    href={`https://sepolia.etherscan.io/tx/${ethTxHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-purple-600 hover:underline break-all text-sm"
-                  >
-                    {ethTxHash}
-                  </a>
+              <div className="grid md:grid-cols-2 gap-8 text-xl mb-8">
+                <div>
+                  <p><strong>Evidence ID:</strong> {retrievedEvidence.evidence_id || retrievedEvidence.id || 'N/A'}</p>
+                  <p><strong>Post ID:</strong> {retrievedEvidence.id || 'N/A'}</p>
+                  <p><strong>Author:</strong> @{retrievedEvidence.author_username || 'N/A'}</p>
+                  <p><strong>Investigator:</strong> {retrievedEvidence.investigator || 'N/A'}</p>
+                  <p><strong>Timestamp:</strong> {retrievedEvidence.created_at || retrievedEvidence.timestamp || 'N/A'}</p>
                 </div>
-              )}
+                <div>
+                  {ethTxHash && (
+                    <div>
+                      <p className="font-bold mb-2">Ethereum Transaction:</p>
+                      <a
+                        href={`https://sepolia.etherscan.io/tx/${ethTxHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-purple-700 hover:underline break-all block text-lg"
+                      >
+                        {ethTxHash}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-8">
+                <p className="font-bold text-2xl text-gray-800 mb-4">Original Content:</p>
+                <div className="bg-white p-8 rounded-2xl border-2 border-gray-200 shadow-inner text-gray-800 text-lg leading-relaxed">
+                  {retrievedEvidence.text || retrievedEvidence.content || 'No content recorded'}
+                </div>
+              </div>
 
               {retrievedEvidence.media_urls?.length > 0 && (
-                <div className="mt-6">
-                  <p className="font-medium text-gray-800 mb-3">Attached Media:</p>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="mt-12">
+                  <p className="font-bold text-2xl text-gray-800 mb-6">
+                    Attached Media ({retrievedEvidence.media_urls.length})
+                  </p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
                     {retrievedEvidence.media_urls.map((url, i) => (
-                      <img
-                        key={i}
-                        src={url}
-                        alt={`Evidence media ${i + 1}`}
-                        className="w-full h-auto rounded-xl shadow-md border"
-                        onError={(e) => (e.target.style.display = 'none')}
-                      />
+                      <div key={i} className="group">
+                        <img
+                          src={url}
+                          alt={`Evidence media ${i + 1}`}
+                          className="w-full h-auto rounded-2xl shadow-xl border-2 border-gray-200 group-hover:scale-105 group-hover:shadow-2xl transition-all duration-300"
+                          onError={(e) => (e.target.style.display = 'none')}
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>
