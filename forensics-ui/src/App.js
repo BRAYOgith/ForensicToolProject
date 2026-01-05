@@ -22,7 +22,7 @@ function ActivatePage() {
 
     const activateAccount = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/activate?token=${token}`);
+        const response = await fetch(`https://forensictoolproject.onrender.com/activate?token=${token}`);
 
         if (response.ok) {
           setMessage('Account activated successfully! Redirecting to login...');
