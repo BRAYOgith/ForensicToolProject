@@ -16,8 +16,7 @@ import pdfkit
 from functools import wraps
 from datetime import timedelta
 from bcrypt import gensalt, hashpw, checkpw
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
+
 
 logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -43,43 +42,55 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-MODEL_PATH = "Brayo44/chainforensix_defamation_model"  
-tokenizer = None
-model = None
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-def load_model():
-    """Loads the model only when needed (Lazy Loading)"""
-    global tokenizer, model
-    if model is not None:
-        return  # Already loaded
-    try:
-        logger.info(f"Loading defamation model from: {MODEL_PATH}")
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-        model.to(device)
-        model.eval()
-        logger.info(f"Defamation model loaded on {device}")
-    except Exception as e:
-        logger.warning(f"Failed to load defamation model: {e}")
-        
+API_URL = "https://api-inference.huggingface.co/models/Brayo44/chainforensix_defamation_model"
+HF_API_KEY = os.getenv("HF_API_KEY")
 def predict_defamatory(text):
+    text_lower = text.lower()
     
-    if not model:
-        load_model()
-    
-    
-    if not tokenizer or not model:
-        return {"is_defamatory": False, "confidence": 0.0}
     safe_keywords = ['congrat', 'congrats', 'well done', 'good', 'positive', 'welcome', 'happy', 'celebrate', 'victory', 'win', 'president', 'FA', 'years', '👌']
-    if any(word in text.lower() for word in safe_keywords):
+    if any(word in text_lower for word in safe_keywords):
         logger.info("Safe keywords detected – lowering confidence")
         return {"is_defamatory": False, "confidence": 0.0}
+ 
+    risk_keywords = [
+        'madoadoa', 'inyenzi', 'cockroaches', 'fumigate', 'fumigation', 'kwekwe', 
+        'conman', 'thief', 'looter', 'cartel', 'kill', 'eliminate', 'bloodsucker',
+        'snake', 'devil', 'witches', 'sorcerer', 'rapist', 'murderer', 'sipangwingwi', 'tusitishwe'
+    ]
+    
+    found_risk_words = [word for word in risk_keywords if word in text_lower]
+    if found_risk_words:
+        logger.info(f"High-risk/NCIC keywords detected: {found_risk_words}")
+        
+        return {"is_defamatory": True, "confidence": 1.0}
+    
+    if not HF_API_KEY:
+        logger.warning("HF_API_KEY not set - skipping AI check")
+        return {"is_defamatory": False, "confidence": 0.0}
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {"inputs": text}
     try:
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512).to(device)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
-            confidence = float(prob[0][1].item())
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=5)
+        
+        if response.status_code != 200:
+            logger.error(f"HF API Error {response.status_code}: {response.text}")
+            return {"is_defamatory": False, "confidence": 0.0}
+        output = response.json()
+        
+        if isinstance(output, list) and len(output) > 0 and isinstance(output[0], list):
+            scores = output[0]
+        elif isinstance(output, list):
+            scores = output
+        else:
+             return {"is_defamatory": False, "confidence": 0.0}
+        
+        defamatory_score = 0.0
+        for item in scores:
+            if item.get('label') in ['LABEL_1', 'DEFAMATORY']:
+                defamatory_score = item['score']
+                break
+        
+        confidence = float(defamatory_score)
         is_defamatory = confidence >= 0.90
         return {"is_defamatory": is_defamatory, "confidence": round(confidence, 4)}
     except Exception as e:
