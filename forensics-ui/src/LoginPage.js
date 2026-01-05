@@ -13,7 +13,7 @@ function LoginPage({ setIsAuthenticated }) {
 
   const navigate = useNavigate();
 
-  const API_BASE = 'http://localhost:5000'; // Change to production URL later
+  const API_BASE = 'https://forensictoolproject.onrender.com';
 
   const handleLogin = async (e) => {
     e.preventDefault();
