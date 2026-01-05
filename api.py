@@ -35,7 +35,7 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-MODEL_PATH = "chainforensix_defamation_model"
+MODEL_PATH = "Brayo44/chainforensix_defamation_model"
 
 tokenizer = None
 model = None
