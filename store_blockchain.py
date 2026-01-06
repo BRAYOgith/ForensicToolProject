@@ -45,13 +45,6 @@ if not web3.is_connected():
 
 logger.info(f"Connected to Sepolia. Chain ID: {web3.eth.chain_id}")
 
-if not web3.is_address(contract_address):
-    logger.error(f"Invalid contract address: {contract_address}")
-    raise ValueError("Invalid CONTRACT_ADDRESS")
-
-# REMOVED HARD-CODED WINDOWS PATH
-# Embedded current ABI — safe for localhost and Render
-# This is your current contract ABI (before AI fields)
 contract_abi = [
     {
         "inputs": [],
@@ -144,51 +137,41 @@ contract = web3.eth.contract(
 )
 
 account = web3.eth.account.from_key(private_key)
-if account.address.lower() != wallet_address.lower():
-    logger.error("Private key does not match WALLET_ADDRESS")
-    raise ValueError("Private key does not match WALLET_ADDRESS")
 web3.eth.default_account = account.address
-logger.info(f"Using account: {account.address}")
 
 def generate_evidence_hash(content, author_username, post_id, timestamp):
     try:
         if not all([content, author_username, post_id, timestamp]):
             logger.error("Missing fields for hash generation")
-            raise ValueError("All fields required")
+            return None
         data_string = f"{content}{author_username}{str(post_id)}{timestamp}"
-        hash_value = hashlib.sha256(data_string.encode('utf-8')).hexdigest()
-        return hash_value
+        return hashlib.sha256(data_string.encode('utf-8')).hexdigest()
     except Exception as e:
         logger.error(f"Error generating hash: {str(e)}")
         return None
 
 def store_evidence(evidence_data):
     try:
-        if isinstance(evidence_data, str):
-            evidence = json.loads(evidence_data)
-        else:
-            evidence = evidence_data
-
+        evidence = json.loads(evidence_data) if isinstance(evidence_data, str) else evidence_data
         if not isinstance(evidence, dict):
-            logger.error("Evidence must be dict or JSON string")
             return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
 
         content = evidence.get("content", "")
         author_username = evidence.get("author_username", "")
-        post_id = evidence.get("hash", evidence.get("post_id", ""))  # Accept both
+        post_id = evidence.get("hash", evidence.get("post_id", ""))
         timestamp = evidence.get("timestamp", "")
         investigator = evidence.get("investigator", "")
         media_urls = evidence.get("mediaUrls", [])
 
-        # Use provided hash if exists, otherwise generate
         hash_value = evidence.get("hash", "")
-        if not hash_value:
+        is_valid_hex = isinstance(hash_value, str) and len(hash_value) == 64 and all(c in '0123456789abcdefABCDEF' for c in hash_value)
+        
+        if not is_valid_hex:
             hash_value = generate_evidence_hash(content, author_username, post_id, timestamp)
             if not hash_value:
                 return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
 
         if not all([hash_value, timestamp, investigator]):
-            logger.error("Missing required fields")
             return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
 
         if not isinstance(media_urls, list):
@@ -196,7 +179,7 @@ def store_evidence(evidence_data):
 
         try:
             gas_estimate = contract.functions.storeEvidence(
-                hash_value, timestamp, investigator, content, author_username, media_urls
+                web3.to_bytes(hexstr=hash_value), timestamp, investigator, content, author_username, media_urls
             ).estimate_gas({"from": account.address})
             gas_limit = int(gas_estimate * 1.2)
         except:
@@ -204,7 +187,7 @@ def store_evidence(evidence_data):
 
         nonce = web3.eth.get_transaction_count(account.address)
         tx = contract.functions.storeEvidence(
-            hash_value, timestamp, investigator, content, author_username, media_urls
+            web3.to_bytes(hexstr=hash_value), timestamp, investigator, content, author_username, media_urls
         ).build_transaction({
             "from": account.address,
             "nonce": nonce,
@@ -215,27 +198,19 @@ def store_evidence(evidence_data):
 
         signed_tx = web3.eth.account.sign_transaction(tx, private_key)
         eth_tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        logger.info(f"Sent tx: {eth_tx_hash.hex()}")
-
         receipt = web3.eth.wait_for_transaction_receipt(eth_tx_hash, timeout=120)
+
         if receipt.status == 0:
-            logger.error("Transaction failed")
             return {"receipt": receipt, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": eth_tx_hash.hex()}
 
-        try:
-            events = contract.events.EvidenceStored().process_receipt(receipt)
-            if events:
-                evidence_id = events[0]["args"]["index"]
-                event_tx_hash = events[0]["args"]["txHash"].hex()
-                logger.info(f"Success - Evidence ID: {evidence_id}")
-                return {
-                    "receipt": receipt,
-                    "evidence_id": evidence_id,
-                    "tx_hash": event_tx_hash,
-                    "eth_tx_hash": eth_tx_hash.hex()
-                }
-        except Exception as e:
-            logger.error(f"Event parsing error: {e}")
+        events = contract.events.EvidenceStored().process_receipt(receipt)
+        if events:
+            return {
+                "receipt": receipt,
+                "evidence_id": events[0]["args"]["index"],
+                "tx_hash": events[0]["args"]["txHash"].hex(),
+                "eth_tx_hash": eth_tx_hash.hex()
+            }
 
         return {"receipt": receipt, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": eth_tx_hash.hex()}
 
@@ -245,12 +220,11 @@ def store_evidence(evidence_data):
 
 def get_evidence(index):
     try:
-        if index < 0:
-            return None
+        if index < 0: return None
         evidence = contract.functions.getEvidence(index).call()
         if evidence and evidence[0]:
             return {
-                "hash": evidence[0],
+                "hash": evidence[0].hex(),
                 "timestamp": evidence[1],
                 "investigator": evidence[2],
                 "content": evidence[3],
@@ -271,7 +245,7 @@ def get_evidence_by_tx_hash(tx_hash):
         if evidence and evidence[1]:
             return {
                 "evidence_id": evidence[0],
-                "hash": evidence[1],
+                "hash": evidence[1].hex(),
                 "timestamp": evidence[2],
                 "investigator": evidence[3],
                 "content": evidence[4],
