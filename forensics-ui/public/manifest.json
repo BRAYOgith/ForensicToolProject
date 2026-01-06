@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "ChainForensix",
+  "name": "A Blockchain based forensics X post management tool",
   "icons": [
     {
       "src": "favicon.ico",
