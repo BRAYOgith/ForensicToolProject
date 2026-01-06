@@ -106,39 +106,58 @@ headers = {"Authorization": f"Bearer {bearer_token}"}
 
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
-def send_activation_email(email, token):
+def send_forensic_email(email, token, email_type="activation"):
+    """
+    Sends either an Activation or Password Reset email using Brevo.
+    email_type: "activation" or "reset"
+    """
     if not BREVO_API_KEY:
-        logger.warning("BREVO_API_KEY not set — printing activation link to console for local testing")
-        activation_link = f"https://forensic-tool-project.vercel.app/activate?token={token}"
-        print(f"\n=== ACTIVATION LINK FOR {email} ===\n{activation_link}\n========================================\n")
+        logger.warning(f"BREVO_API_KEY not set — printing {email_type} link to console")
+        route = "activate" if email_type == "activation" else "reset-password"
+        link = f"https://forensic-tool-project.vercel.app/{route}?token={token}"
+        print(f"\n=== {email_type.upper()} LINK ===\n{link}\n")
         return
 
-    activation_link = f"https://forensic-tool-project.vercel.app/activate?token={token}"
+    # Determine wording and route based on purpose
+    if email_type == "activation":
+        route = "activate"
+        subject = "Activate Your Forensic Tool Account"
+        title = "Welcome to ChainForensix!"
+        button_text = "Activate My Account"
+        instruction = "Please click the button below to activate your account."
+    else:
+        route = "reset-password"
+        subject = "Reset Your Forensic Tool Password"
+        title = "Password Reset Request"
+        button_text = "Reset My Password"
+        instruction = "We received a request to reset your password. Click the button below to continue."
+
+    activation_link = f"https://forensic-tool-project.vercel.app/{route}?token={token}"
 
     url = "https://api.brevo.com/v3/smtp/email"
     payload = {
         "sender": {
-            "name": "Forensic Tool",
+            "name": "ChainForensix Support",
             "email": "briannjoki619@gmail.com"
         },
         "to": [{"email": email}],
-        "subject": "Activate Your Forensic Tool Account",
+        "subject": subject,
         "htmlContent": f"""
         <html>
         <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;">
             <div style="background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center;">
-                <h1 style="color: #1a73e8; font-size: 28px;">Forensic Tool</h1>
-                <h2 style="color: #333; margin: 30px 0;">Welcome!</h2>
+                <h1 style="color: #1a73e8; font-size: 28px;">ChainForensix</h1>
+                <h2 style="color: #333; margin: 30px 0;">{title}</h2>
                 <p style="font-size: 18px; color: #555; line-height: 1.6;">
-                    Please click the button below to activate your account.
+                    {instruction}
                 </p>
                 <a href="{activation_link}" 
                    style="display: inline-block; margin: 30px 0; padding: 16px 32px; background: #1a73e8; color: white; text-decoration: none; font-weight: bold; font-size: 18px; border-radius: 8px;">
-                    Activate My Account
+                    {button_text}
                 </a>
                 <p style="color: #777; font-size: 14px; margin-top: 40px;">
                     This link expires in 1 hour.<br>
-                    If you didn't register, please ignore this email.
+                    If you didn't request this, please ignore this email.
                 </p>
             </div>
         </body>
@@ -155,11 +174,11 @@ def send_activation_email(email, token):
     try:
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code in [200, 201]:
-            logger.info(f"Activation email successfully sent to {email}")
+            logger.info(f"{email_type} email successfully sent to {email}")
         else:
             logger.error(f"Brevo error {response.status_code}: {response.text}")
     except Exception as e:
-        logger.error(f"Failed to send activation email: {e}")
+        logger.error(f"Failed to send {email_type} email: {e}")
 
 def init_db():
     conn = sqlite3.connect('forensic.db')
@@ -250,17 +269,39 @@ def expand_urls(text, urls):
             text = text.replace(url_obj['url'], url_obj['expanded_url'])
     return text
 
+def validate_auth_input(username=None, password=None, email=None):
+    if username is not None:
+        if len(username) < 3:
+            return "Username must be at least 3 characters long."
+        if not re.match(r'^[a-zA-Z0-9_]+$', username):
+            return "Username can only contain letters, numbers, and underscores."
+    
+    if password is not None:
+        if not re.match(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$', password):
+            return "Password must be at least 8 characters long and include uppercase, lowercase, a number, and a special character."
+    
+    if email is not None:
+        if not re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', email):
+            return "Please provide a valid email address."
+            
+    return None
+
 @app.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    email = data.get('email')
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    email = data.get('email', '').strip()
+
     if not username or not password or not email:
-        return jsonify({'error': 'Username, password, and email are required'}), 400
+        return jsonify({'error': 'All fields are required.'}), 400
+
+    validation_error = validate_auth_input(username=username, password=password, email=email)
+    if validation_error:
+        return jsonify({'error': validation_error}), 400
+
     hashed = hashpw(password.encode('utf-8'), gensalt())
-    conn = sqlite3.connect('forensic.db')
-    c = conn.cursor()
+    conn = sqlite3.connect('forensic.db'); c = conn.cursor()
     try:
         c.execute('INSERT INTO users (username, password, email, is_active) VALUES (?, ?, ?, 0)', (username, hashed, email))
         user_id = c.lastrowid
@@ -269,15 +310,13 @@ def register():
             'user_id': user_id,
             'exp': datetime.datetime.utcnow() + timedelta(hours=1)
         }, app.config['SECRET_KEY'])
-        send_activation_email(email, activation_token)
-        conn.close()
-        return jsonify({'message': 'Registration successful. Please check your email to activate your account.'}), 201
+        
+        send_forensic_email(email, activation_token, email_type="activation")
+        return jsonify({'message': 'Registration successful. Check email to activate.'}), 201
     except sqlite3.IntegrityError:
-        conn.close()
         return jsonify({'error': 'Username already exists'}), 400
-    except Exception as e:
+    finally:
         conn.close()
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/activate', methods=['GET'])
 def activate():
@@ -352,6 +391,75 @@ def resend_activation():
     send_activation_email(email, token)
     return jsonify({'message': 'New activation link sent! Check your inbox and spam folder.'}), 200
 
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    data = request.get_json()
+    email = data.get('email')
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT id FROM users WHERE email = ?', (email,))
+    user = c.fetchone()
+    conn.close()
+
+    if not user:
+        return jsonify({'message': 'If an account exists with this email, a reset link has been sent.'}), 200
+
+    reset_token = jwt.encode({
+        'user_id': user[0],
+        'action': 'password_reset',
+        'exp': datetime.datetime.utcnow() + timedelta(hours=1)
+    }, app.config['SECRET_KEY'])
+
+    send_forensic_email(email, reset_token, email_type="reset")
+    return jsonify({'message': 'A password reset link has been sent to your email.'}), 200
+
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    data = request.get_json()
+    token = data.get('token')
+    new_password = data.get('password')
+
+    if not token or not new_password:
+        return jsonify({'error': 'Token and new password are required'}), 400
+
+    validation_error = validate_auth_input(password=new_password)
+    if validation_error:
+        return jsonify({'error': validation_error}), 400
+
+    try:
+        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        if decoded.get('action') != 'password_reset':
+            return jsonify({'error': 'Invalid reset token'}), 400
+        
+        user_id = decoded['user_id']
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('SELECT password FROM users WHERE id = ?', (user_id,))
+        old_password_hash = c.fetchone()
+        
+        if not old_password_hash:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+
+        if checkpw(new_password.encode('utf-8'), old_password_hash[0]):
+            conn.close()
+            return jsonify({'error': 'New password cannot be the same as your old password.'}), 400
+
+        hashed = hashpw(new_password.encode('utf-8'), gensalt())
+        c.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, user_id))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Password reset successful. You can now log in.'}), 200
+
+    except jwt.ExpiredSignatureError:
+        return jsonify({'error': 'Reset link expired'}), 400
+    except Exception as e:
+        return jsonify({'error': 'Invalid reset link'}), 400
+        
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
