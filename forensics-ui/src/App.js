@@ -4,6 +4,8 @@ import FetchPage from './FetchPage';
 import RetrievePage from './RetrievePage';
 import LoginPage from './LoginPage';
 import ReportPage from './ReportPage';
+import LandingPage from './LandingPage';
+import ResetPasswordPage from './ResetPasswordPage';
 import './index.css';
 
 function ActivatePage() {
@@ -70,6 +72,18 @@ function ProtectedRoute({ children }) {
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'));
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  const [isPwdMode, setIsPwdMode] = useState(localStorage.getItem('pwd') === 'true');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-accessibility', isPwdMode ? 'pwd' : 'none');
+    localStorage.setItem('pwd', isPwdMode);
+  }, [isPwdMode]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -79,43 +93,74 @@ function App() {
     window.location.href = '/login';
   };
 
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  const togglePwd = () => setIsPwdMode(prev => !prev);
+
   return (
     <Router>
-      <div className="min-h-screen bg-gray-100 flex flex-col">
-        <nav className="bg-white shadow-md px-6 py-4">
+      <div className="min-h-screen flex flex-col font-sans transition-colors duration-300">
+        <nav className="bg-[var(--bg-color)]/80 backdrop-blur-md border-b border-[var(--border-color)] px-6 py-4 sticky top-0 z-50">
           <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center">
-            <h1 className="text-3xl font-bold text-blue-700 mb-4 sm:mb-0">ForensicTool</h1>
-            <div className="flex flex-wrap justify-center gap-6">
-              {!isAuthenticated ? (
-                <Link
-                  to="/login"
-                  className="text-blue-600 hover:text-blue-800 font-medium text-lg"
+            <Link to="/" className="flex items-center gap-3 text-3xl font-bold text-[var(--text-primary)] mb-4 sm:mb-0 group">
+              <img src="/logo.png" alt="ChainForensix Logo" className="w-10 h-10 object-contain" />
+              <span className="tracking-tight">ChainForensix</span>
+            </Link>
+            <div className="flex flex-wrap justify-center items-center gap-6">
+              <div className="flex items-center gap-2 border-r border-[var(--border-color)] pr-6 mr-2">
+                <button
+                  onClick={toggleTheme}
+                  className="p-2 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] hover:text-[var(--accent-cyan)] transition-all text-xs font-bold uppercase tracking-widest"
+                  title="Toggle Theme"
                 >
-                  Login / Register
-                </Link>
-              ) : (
+                  {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                </button>
+                <button
+                  onClick={togglePwd}
+                  className={`p-2 rounded-lg bg-[var(--bg-secondary)] transition-all text-xs font-bold uppercase tracking-widest ${isPwdMode ? 'text-orange-500 border border-orange-500/30' : 'text-[var(--text-primary)] hover:text-[var(--accent-cyan)]'}`}
+                  title="Toggle Accessibility Mode"
+                >
+                  PWD: {isPwdMode ? 'ON' : 'OFF'}
+                </button>
+              </div>
+
+              {!isAuthenticated ? (
                 <>
                   <Link
                     to="/"
-                    className="text-blue-600 hover:text-blue-800 font-medium text-lg"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors"
                   >
-                    Fetch & Store
+                    Home
+                  </Link>
+                  <Link
+                    to="/login"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors border border-[var(--border-color)] hover:border-[var(--accent-cyan)]/50 px-4 py-1 rounded-full"
+                  >
+                    Join Us
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/analyze"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors"
+                  >
+                    Forensic Analysis
                   </Link>
                   <Link
                     to="/retrieve"
-                    className="text-blue-600 hover:text-blue-800 font-medium text-lg"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors"
                   >
-                    Retrieve
+                    Evidence Log
                   </Link>
                   <Link
                     to="/report"
-                    className="text-blue-600 hover:text-blue-800 font-medium text-lg"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors"
                   >
-                    Report
+                    Court Reports
                   </Link>
                   <button
                     onClick={handleLogout}
-                    className="text-red-600 hover:text-red-800 font-medium text-lg"
+                    className="text-red-400 hover:text-red-500 font-medium text-lg transition-colors"
                   >
                     Logout
                   </button>
@@ -128,10 +173,12 @@ function App() {
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-4xl">
             <Routes>
+              <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage setIsAuthenticated={setIsAuthenticated} />} />
               <Route path="/activate" element={<ActivatePage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route
-                path="/"
+                path="/analyze"
                 element={
                   <ProtectedRoute>
                     <FetchPage />
