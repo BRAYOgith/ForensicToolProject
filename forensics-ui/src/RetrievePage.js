@@ -167,122 +167,147 @@ function RetrievePage() {
   const confidence = defamation?.confidence || 0;
 
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow-2xl rounded-2xl p-8">
-          <h2 className="text-3xl font-bold text-center text-gray-800 mb-10">
-            Retrieve Evidence from Blockchain
-          </h2>
+    <div className="min-h-screen bg-[var(--bg-color)] py-8 px-4 font-sans relative overflow-hidden transition-colors duration-300">
+      {/* Background Glows */}
+      <div className="absolute top-0 right-0 w-[40%] h-[40%] bg-blue-600 rounded-full blur-[150px] opacity-10 glow-orb"></div>
+      <div className="absolute bottom-0 left-0 w-[40%] h-[40%] bg-cyan-500 rounded-full blur-[150px] opacity-10 glow-orb" style={{ animationDelay: '-5s' }}></div>
 
-          <form onSubmit={handleRetrieve} className="space-y-8">
-            <div>
-              <label className="block text-lg font-medium text-gray-700 mb-3">
-                Evidence ID (numeric)
+      <div className="max-w-4xl mx-auto relative z-10">
+        <div className="glass-card rounded-3xl p-8">
+          <header className="text-center mb-10">
+            <h2 className="text-3xl font-extrabold text-[var(--text-primary)] mb-2">
+              Evidence Log
+            </h2>
+            <p className="text-[var(--accent-cyan)] font-mono text-xs tracking-widest uppercase italic">Immutable Blockchain Retrieval</p>
+          </header>
+
+          <form onSubmit={handleRetrieve} className="space-y-6">
+            <div className="group">
+              <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+                Evidence UID (Numeric)
               </label>
               <input
                 type="text"
                 value={evidenceId}
                 onChange={(e) => setEvidenceId(e.target.value)}
                 placeholder="e.g., 1, 2, 3..."
-                className="w-full px-5 py-4 text-lg border border-gray-300 rounded-xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition"
+                className="w-full px-5 py-4 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-2xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all shadow-inner"
               />
             </div>
 
-            <div className="relative">
-              <label className="block text-lg font-medium text-gray-700 mb-3">
+            <div className="relative group">
+              <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
                 Or Transaction Hash
               </label>
               <input
                 type="text"
                 value={txHash}
                 onChange={(e) => setTxHash(e.target.value)}
-                placeholder="e.g., 0xabc123... (66 characters)"
-                className="w-full px-5 py-4 text-lg border border-gray-300 rounded-xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition"
+                placeholder="0x..."
+                className="w-full px-5 py-4 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-2xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all shadow-inner"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading || (!evidenceId.trim() && !txHash.trim())}
-              className="w-full bg-gradient-to-r from-purple-600 to-indigo-700 text-white font-bold text-xl py-5 rounded-2xl hover:from-purple-700 hover:to-indigo-800 transition shadow-xl disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full bg-cyan-500 hover:bg-cyan-600 text-[#0A192F] font-bold py-4 rounded-2xl transition-all shadow-lg shadow-cyan-500/20 transform hover:scale-[1.01] disabled:opacity-50"
             >
-              {loading ? 'Retrieving from Blockchain...' : 'Retrieve Evidence'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-[#0A192F] border-t-transparent rounded-full animate-spin"></div>
+                  LOCATING BLOCKS...
+                </span>
+              ) : 'RETRIEVE SECURE EVIDENCE'}
             </button>
           </form>
 
-          <p className="mt-8 text-center text-xl font-medium text-gray-700">
-            Status: <span className="text-purple-700 font-bold">{status}</span>
-          </p>
+          {status && (
+            <div className="mt-8 p-4 bg-[#0A192F]/50 border border-gray-800 rounded-xl text-center">
+              <p className="text-gray-400 text-sm font-mono uppercase">
+                Status: <span className="text-cyan-400 font-bold ml-2">{status}</span>
+              </p>
+            </div>
+          )}
 
           {retrievedEvidence && (
-            <div className="mt-12 p-10 bg-gradient-to-br from-purple-50 to-indigo-100 rounded-3xl shadow-2xl border-2 border-purple-200">
-              {defamation && (
-                <div
-                  className={`mb-10 p-8 rounded-3xl text-white font-extrabold text-center text-3xl shadow-2xl tracking-wide ${
-                    isDefamatory ? 'bg-red-600' : 'bg-green-600'
-                  }`}
-                >
-                  {isDefamatory
-                    ? `⚠️ DEFAMATORY CONTENT DETECTED – ${(confidence * 100).toFixed(1)}% CONFIDENCE`
-                    : `✅ NO DEFAMATION FOUND – ${(confidence * 100).toFixed(1)}% CONFIDENCE`}
-                </div>
-              )}
-
-              <h3 className="text-3xl font-bold text-center text-gray-800 mb-8">
-                Immutable Evidence from Blockchain
-              </h3>
-
-              <div className="grid md:grid-cols-2 gap-8 text-xl mb-8">
-                <div>
-                  <p><strong>Evidence ID:</strong> {retrievedEvidence.evidence_id || retrievedEvidence.id || 'N/A'}</p>
-                  <p><strong>Post ID:</strong> {retrievedEvidence.id || 'N/A'}</p>
-                  <p><strong>Author:</strong> @{retrievedEvidence.author_username || 'N/A'}</p>
-                  <p><strong>Investigator:</strong> {retrievedEvidence.investigator || 'N/A'}</p>
-                  <p><strong>Timestamp:</strong> {retrievedEvidence.created_at || retrievedEvidence.timestamp || 'N/A'}</p>
-                </div>
-                <div>
-                  {ethTxHash && (
-                    <div>
-                      <p className="font-bold mb-2">Ethereum Transaction:</p>
-                      <a
-                        href={`https://sepolia.etherscan.io/tx/${ethTxHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-purple-700 hover:underline break-all block text-lg"
-                      >
-                        {ethTxHash}
-                      </a>
+            <div className="mt-12 animate-slide-up">
+              <div className="border-t border-gray-800 pt-10">
+                {defamation && (
+                  <div
+                    className={`mb-10 p-8 rounded-3xl text-white font-bold text-center relative overflow-hidden shadow-2xl border-2 ${isDefamatory
+                      ? 'bg-red-500/10 border-red-500/50 text-red-400'
+                      : 'bg-green-500/10 border-green-500/50 text-green-400'
+                      }`}
+                  >
+                    <div className="relative z-10">
+                      <h4 className="text-sm uppercase tracking-[0.2em] mb-2 opacity-80">Blockchain Verified Audit</h4>
+                      <p className="text-3xl font-black mb-2 uppercase">
+                        {isDefamatory ? 'CRITICAL: RED-FLAG DETECTED' : 'SYSTEM: CLEAR / NEUTRAL'}
+                      </p>
+                      <p className="font-mono text-xs">MODEL CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
 
-              <div className="mt-8">
-                <p className="font-bold text-2xl text-gray-800 mb-4">Original Content:</p>
-                <div className="bg-white p-8 rounded-2xl border-2 border-gray-200 shadow-inner text-gray-800 text-lg leading-relaxed">
-                  {retrievedEvidence.text || retrievedEvidence.content || 'No content recorded'}
-                </div>
-              </div>
-
-              {retrievedEvidence.media_urls?.length > 0 && (
-                <div className="mt-12">
-                  <p className="font-bold text-2xl text-gray-800 mb-6">
-                    Attached Media ({retrievedEvidence.media_urls.length})
-                  </p>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-8">
-                    {retrievedEvidence.media_urls.map((url, i) => (
-                      <div key={i} className="group">
-                        <img
-                          src={url}
-                          alt={`Evidence media ${i + 1}`}
-                          className="w-full h-auto rounded-2xl shadow-xl border-2 border-gray-200 group-hover:scale-105 group-hover:shadow-2xl transition-all duration-300"
-                          onError={(e) => (e.target.style.display = 'none')}
-                        />
-                      </div>
-                    ))}
+                <div className="grid md:grid-cols-2 gap-6 mb-8">
+                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Subject Handle</label>
+                    <p className="text-white font-bold text-lg">@{retrievedEvidence.author_username || 'N/A'}</p>
+                  </div>
+                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Evidence UID</label>
+                    <p className="text-white font-bold text-lg">#{retrievedEvidence.evidence_id || 'N/A'}</p>
+                  </div>
+                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Assigned Investigator</label>
+                    <p className="text-white font-bold text-lg">{retrievedEvidence.investigator || 'N/A'}</p>
+                  </div>
+                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Timestamp logged</label>
+                    <p className="text-white font-bold text-lg">{retrievedEvidence.created_at || retrievedEvidence.timestamp || 'N/A'}</p>
                   </div>
                 </div>
-              )}
+
+                <div className="bg-[#0A192F] p-8 rounded-3xl border border-gray-800 shadow-inner mb-8">
+                  <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-3 block">Immutable Content Record</label>
+                  <p className="text-gray-300 leading-relaxed italic text-lg">
+                    "{retrievedEvidence.text || retrievedEvidence.content || 'No text content recorded.'}"
+                  </p>
+                </div>
+
+                {ethTxHash && (
+                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner mb-10">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2 block">Ethereum Blockchain Receipt (Sepolia)</label>
+                    <a
+                      href={`https://sepolia.etherscan.io/tx/${ethTxHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-400 hover:underline break-all block font-mono text-xs"
+                    >
+                      {ethTxHash}
+                    </a>
+                  </div>
+                )}
+
+                {retrievedEvidence.media_urls?.length > 0 && (
+                  <div className="mb-10">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-4 block">Secured Assets ({retrievedEvidence.media_urls.length})</label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {retrievedEvidence.media_urls.map((url, i) => (
+                        <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-gray-800 shadow-lg group">
+                          <img
+                            src={url}
+                            alt={`Evidence media ${i + 1}`}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            onError={(e) => (e.target.closest('.group').style.display = 'none')}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
