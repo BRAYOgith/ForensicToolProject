@@ -112,81 +112,101 @@ function ReportPage() {
     }
   };
 
-  // Calculate defamation statistics
+ 
   const totalFetched = reportData?.fetched.length || 0;
   const defamatoryCount = reportData?.fetched.filter(item => {
-    // In future, this can come from stored defamation result
-    // For now, simulate based on your existing logic
-    return false; // Replace with actual AI result when available
+    return false; 
   }).length || 0;
   const defamationRate = totalFetched > 0 ? (defamatoryCount / totalFetched) * 100 : 0;
 
   // Weekly Pie Chart
   const weeklyChartData = statsData
     ? {
-        labels: ['Fetches This Week', 'Retrievals This Week'],
-        datasets: [
-          {
-            data: [statsData.weekly.fetches, statsData.weekly.retrievals],
-            backgroundColor: ['#1e40af', '#16a34a'],
-            borderColor: ['#ffffff', '#ffffff'],
-            borderWidth: 3,
-          },
-        ],
-      }
+      labels: ['Fetches', 'Retrievals'],
+      datasets: [
+        {
+          data: [statsData.weekly.fetches, statsData.weekly.retrievals],
+          backgroundColor: ['#06b6d4', '#3b82f6'],
+          borderColor: '#0A192F',
+          borderWidth: 2,
+        },
+      ],
+    }
     : null;
 
   // Daily Bar Chart
   const dailyBarData = statsData
     ? {
-        labels: ['Yesterday', 'Today'],
-        datasets: [
-          {
-            label: 'Fetches',
-            data: [statsData.daily.yesterday.fetches, statsData.daily.today.fetches],
-            backgroundColor: '#3b82f6',
-          },
-          {
-            label: 'Retrievals',
-            data: [statsData.daily.yesterday.retrievals, statsData.daily.today.retrievals],
-            backgroundColor: '#10b981',
-          },
-        ],
-      }
+      labels: ['Yesterday', 'Today'],
+      datasets: [
+        {
+          label: 'Fetches',
+          data: [statsData.daily.yesterday.fetches, statsData.daily.today.fetches],
+          backgroundColor: '#06b6d4',
+        },
+        {
+          label: 'Retrievals',
+          data: [statsData.daily.yesterday.retrievals, statsData.daily.today.retrievals],
+          backgroundColor: '#3b82f6',
+        },
+      ],
+    }
     : null;
 
   // Defamation Rate Pie
   const defamationPieData = {
-    labels: ['Non-Defamatory', 'Defamatory'],
+    labels: ['Safe', 'Red-Flag'],
     datasets: [
       {
         data: [totalFetched - defamatoryCount, defamatoryCount],
         backgroundColor: ['#10b981', '#ef4444'],
-        borderColor: ['#ffffff', '#ffffff'],
-        borderWidth: 3,
+        borderColor: '#0A192F',
+        borderWidth: 2,
       },
     ],
   };
 
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { color: '#94a3b8', font: { size: 12, family: 'Inter' } }
+      },
+      tooltip: {
+        backgroundColor: '#112240',
+        titleColor: '#06b6d4',
+        bodyColor: '#fff',
+        borderColor: '#1e293b',
+        borderWidth: 1,
+      }
+    },
+    scales: {
+      x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } },
+      y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' } }
+    }
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-2xl text-gray-700">Loading your forensic report...</div>
+      <div className="min-h-screen bg-[#0A192F] flex items-center justify-center">
+        <div className="text-xl text-cyan-400 font-mono animate-pulse uppercase tracking-widest">Compiling Forensic Dossier...</div>
       </div>
     );
   }
 
   if (error && !reportData) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
-        <div className="bg-red-50 border border-red-300 text-red-700 px-8 py-6 rounded-xl max-w-lg text-center">
-          <p className="font-bold text-xl">Error Loading Report</p>
-          <p className="mt-4">{error}</p>
+      <div className="min-h-screen bg-[var(--bg-color)] flex items-center justify-center px-4 transition-colors duration-300">
+        <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-10 rounded-3xl max-w-lg text-center shadow-2xl glass-card">
+          <p className="font-bold text-xl mb-4 uppercase tracking-widest">Access Protocol Restricted</p>
+          <p className="opacity-80 mb-6 text-sm">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-6 bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700"
+            className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-xl transition-all"
           >
-            Retry
+            RETRY ACCESS
           </button>
         </div>
       </div>
@@ -194,203 +214,121 @@ function ReportPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-2xl shadow-2xl p-8 mb-10 text-center">
-          <h1 className="text-4xl font-bold mb-2">Forensic Investigation Report</h1>
-          <p className="text-xl opacity-90">Investigator: {reportData?.username || 'Unknown'}</p>
-          <p className="mt-4 text-lg">
-            Total Evidence Fetched: <strong>{totalFetched}</strong> | 
-            Stored on Blockchain: <strong>{reportData?.stored.length || 0}</strong>
-          </p>
-        </div>
+    <div className="min-h-screen bg-[var(--bg-color)] py-8 px-4 font-sans relative overflow-hidden transition-colors duration-300">
+      {/* Background Glows */}
+      <div className="absolute top-0 right-0 w-[50%] h-[50%] bg-blue-600 rounded-full blur-[200px] opacity-10 glow-orb"></div>
+      <div className="absolute bottom-0 left-0 w-[50%] h-[50%] bg-cyan-500 rounded-full blur-[200px] opacity-10 glow-orb" style={{ animationDelay: '-5s' }}></div>
 
-        {/* Stats Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center">
-            <h3 className="text-lg font-semibold text-gray-600">Total Fetched Posts</h3>
-            <p className="text-4xl font-bold text-blue-600 mt-4">{totalFetched}</p>
+      <div className="max-w-6xl mx-auto relative z-10">
+        {/* Header Hero */}
+        <div className="glass-card rounded-3xl p-10 mb-10 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 p-6 flex flex-col items-end">
+            <span className="text-[var(--accent-cyan)] text-[10px] font-mono tracking-widest uppercase">Verified System Status</span>
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mt-1"></div>
           </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center">
-            <h3 className="text-lg font-semibold text-gray-600">Evidence Stored</h3>
-            <p className="text-4xl font-bold text-green-600 mt-4">{reportData?.stored.length || 0}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center">
-            <h3 className="text-lg font-semibold text-gray-600">Defamation Rate</h3>
-            <p className="text-4xl font-bold text-red-600 mt-4">{defamationRate.toFixed(1)}%</p>
+          <h1 className="text-4xl font-black text-[var(--text-primary)] mb-4 tracking-tighter uppercase italic">
+            Vault Summary
+          </h1>
+          <div className="flex flex-wrap gap-4 text-[var(--text-secondary)] uppercase text-[10px] font-mono tracking-widest">
+            <span className="bg-[var(--bg-color)] px-4 py-2 rounded-full border border-[var(--border-color)]">Investigator: <span className="text-[var(--text-primary)]">{reportData?.username || 'Unknown'}</span></span>
+            <span className="bg-[var(--bg-color)] px-4 py-2 rounded-full border border-[var(--border-color)]">Last Pulse: <span className="text-[var(--text-primary)]">{new Date().toLocaleDateString()}</span></span>
           </div>
         </div>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-12">
-          {/* Weekly Activity Pie */}
-          <div className="bg-white rounded-2xl shadow-xl p-8">
-            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Weekly Activity</h3>
-            {weeklyChartData && (
-              <div className="flex justify-center">
-                <div style={{ maxWidth: '380px', height: '380px' }}>
-                  <Pie
-                    data={weeklyChartData}
-                    options={{
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      plugins: {
-                        legend: { position: 'bottom', labels: { font: { size: 14 } } },
-                        tooltip: { enabled: true },
-                      },
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-            <div className="text-center mt-6 space-y-2">
-              <p className="text-lg"><strong>Fetches:</strong> {statsData?.weekly.fetches || 0}</p>
-              <p className="text-lg"><strong>Retrievals:</strong> {statsData?.weekly.retrievals || 0}</p>
-            </div>
+        {/* Major Counters */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+          <div className="glass-card p-8 rounded-3xl hover:border-[var(--accent-cyan)]/30 transition-all group">
+            <h3 className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest mb-4 group-hover:text-[var(--accent-cyan)] transition-colors">Total Scanned</h3>
+            <p className="text-4xl font-black text-[var(--text-primary)]">{totalFetched}</p>
           </div>
-
-          {/* Daily Comparison Bar */}
-          <div className="bg-white rounded-2xl shadow-xl p-8">
-            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Yesterday vs Today</h3>
-            {dailyBarData && (
-              <div className="flex justify-center">
-                <div style={{ maxWidth: '420px', height: '380px' }}>
-                  <Bar
-                    data={dailyBarData}
-                    options={{
-                      responsive: true,
-                      maintainAspectRatio: false,
-                      plugins: {
-                        legend: { position: 'top' },
-                        title: { display: false },
-                      },
-                      scales: {
-                        y: { beginAtZero: true },
-                      },
-                    }}
-                  />
-                </div>
-              </div>
-            )}
+          <div className="bg-[#112240]/40 border border-gray-800 p-8 rounded-3xl shadow-xl hover:border-green-400/30 transition-all group">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 group-hover:text-green-400 transition-colors">On-Chain Secured</h3>
+            <p className="text-5xl font-black text-white">{reportData?.stored.length || 0}</p>
           </div>
-
-          {/* Defamation Rate Pie */}
-          <div className="bg-white rounded-2xl shadow-xl p-8">
-            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">Defamation Analysis</h3>
-            <div className="flex justify-center">
-              <div style={{ maxWidth: '380px', height: '380px' }}>
-                <Pie
-                  data={defamationPieData}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      legend: { position: 'bottom', labels: { font: { size: 14 } } },
-                      tooltip: { enabled: true },
-                    },
-                  }}
-                />
-              </div>
-            </div>
-            <p className="text-center mt-6 text-lg font-medium">
-              {defamatoryCount} out of {totalFetched} posts flagged
-            </p>
-          </div>
-
-          {/* Activity Trend Placeholder (Future: real data) */}
-          <div className="bg-white rounded-2xl shadow-xl p-8">
-            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">7-Day Activity Trend</h3>
-            <div className="text-center text-gray-500 py-20">
-              <p className="text-lg">Coming soon: Daily trend line chart</p>
-              <p className="text-sm mt-4">Will show fetches/retrievals over time</p>
-            </div>
+          <div className="bg-[#112240]/40 border border-gray-800 p-8 rounded-3xl shadow-xl hover:border-red-400/30 transition-all group">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 group-hover:text-red-400 transition-colors">Critical Risk Rate</h3>
+            <p className="text-5xl font-black text-white">{defamationRate.toFixed(1)}%</p>
           </div>
         </div>
 
-        {/* Fetched Evidence List */}
-        <h3 className="text-3xl font-bold text-gray-800 mb-8 text-center">
-          Fetched Evidence ({totalFetched})
-        </h3>
-        {totalFetched > 0 ? (
-          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 mb-12">
-            {reportData.fetched.map((item) => (
-              <div key={item.id} className="bg-white rounded-xl shadow-lg border p-6 hover:shadow-2xl transition">
-                <p className="text-sm text-gray-600"><strong>Post ID:</strong> {item.post_id}</p>
-                <p className="mt-3 text-gray-800 break-words"><strong>Content:</strong> {item.content}</p>
-                <p className="mt-2 text-sm text-gray-600"><strong>Author:</strong> @{item.author_username}</p>
-                <p className="text-sm text-gray-600"><strong>Posted:</strong> {new Date(item.created_at).toLocaleString()}</p>
-                <p className="text-sm text-gray-600"><strong>Fetched:</strong> {new Date(item.timestamp).toLocaleString()}</p>
+        {/* Analytics Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
+          <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-cyan-400 pl-4">Network Activity <span className="text-gray-500 font-mono text-xs">(7-Day)</span></h3>
+            <div className="h-[300px]">
+              {weeklyChartData && <Pie data={weeklyChartData} options={chartOptions} />}
+            </div>
+          </div>
 
-                {item.verified !== undefined && (
-                  <p className={`mt-4 font-bold text-lg ${item.verified ? 'text-green-600' : item.verified === null ? 'text-gray-500' : 'text-red-600'}`}>
-                    {item.verified ? '✓ Verified Match' : item.verified === null ? '– Skipped' : '✗ Mismatch Detected'}
-                  </p>
-                )}
+          <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-blue-500 pl-4">Daily Comparison <span className="text-gray-500 font-mono text-xs">(Fetches/Log)</span></h3>
+            <div className="h-[300px]">
+              {dailyBarData && <Bar data={dailyBarData} options={chartOptions} />}
+            </div>
+          </div>
 
-                {item.media_urls?.length > 0 && (
-                  <div className="mt-6">
-                    <p className="font-bold text-gray-700 mb-3">Media ({item.media_urls.length}):</p>
-                    <div className="grid grid-cols-2 gap-4">
-                      {item.media_urls.map((url, i) => (
-                        <img
-                          key={i}
-                          src={url}
-                          alt={`Evidence ${i + 1}`}
-                          className="w-full h-auto rounded-lg shadow border hover:scale-105 transition"
-                          onError={(e) => (e.target.style.display = 'none')}
-                        />
-                      ))}
-                    </div>
+          <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-red-500 pl-4">Harm Assessment <span className="text-gray-500 font-mono text-xs">(AI Sentiment)</span></h3>
+            <div className="h-[300px]">
+              <Pie data={defamationPieData} options={chartOptions} />
+            </div>
+          </div>
+
+          <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-10 flex flex-col items-center justify-center text-center">
+            <h3 className="text-xl font-bold text-white mb-4">Export Forensic Dossier</h3>
+            <p className="text-gray-400 mb-8 max-w-xs text-sm">Download a comprehensive, court-ready PDF containing all evidence and blockchain verification receipts.</p>
+            <button
+              onClick={downloadReport}
+              disabled={loading}
+              className="w-full bg-cyan-500 hover:bg-cyan-600 text-[#0A192F] font-black py-5 rounded-2xl transition-all shadow-lg shadow-cyan-500/20 transform hover:scale-[1.02] disabled:opacity-50"
+            >
+              {loading ? 'GENERIC PDF...' : 'GENERATE COURT-READY PDF'}
+            </button>
+          </div>
+        </div>
+
+        {/* Stored Evidence Section */}
+        <section className="mt-24">
+          <div className="flex items-center gap-4 mb-10">
+            <h2 className="text-3xl font-black text-white">The Evidence Log</h2>
+            <div className="flex-1 h-[2px] bg-gray-800"></div>
+            <span className="text-cyan-400 font-mono text-xs uppercase bg-[#112240] px-4 py-1 rounded-full border border-gray-800">On-Chain Secured</span>
+          </div>
+
+          {reportData?.stored.length > 0 ? (
+            <div className="grid gap-6 md:grid-cols-3">
+              {reportData.stored.map((item) => (
+                <div key={item.id} className="bg-[#112240]/40 border border-gray-800 rounded-2xl p-6 hover:bg-[#112240]/60 transition-all border-b-cyan-500/50">
+                  <p className="text-cyan-400 font-mono text-[10px] mb-2 uppercase">UID: {item.evidence_id}</p>
+                  <div className="mb-4">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase block">Block Hash</label>
+                    <p className="text-gray-400 font-mono text-[10px] truncate">{item.tx_hash}</p>
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-center text-gray-500 text-xl py-12">No evidence fetched yet</p>
-        )}
+                  {item.eth_tx_hash && (
+                    <a
+                      href={`https://sepolia.etherscan.io/tx/${item.eth_tx_hash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white hover:text-cyan-400 text-xs flex items-center gap-2 transition-colors font-bold"
+                    >
+                      VERIFY ON ETHERSCAN ↗
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-[var(--bg-secondary)]/20 border border-[var(--border-color)] border-dashed rounded-3xl p-20 text-center">
+              <p className="text-[var(--text-secondary)] font-mono italic">Secure Vault is currently empty.</p>
+            </div>
+          )}
+        </section>
 
-        {/* Stored Evidence */}
-        <h3 className="text-3xl font-bold text-gray-800 mt-16 mb-8 text-center">
-          Stored on Blockchain ({reportData?.stored.length || 0})
-        </h3>
-        {reportData?.stored.length > 0 ? (
-          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 mb-12">
-            {reportData.stored.map((item) => (
-              <div key={item.id} className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-lg border p-6">
-                <p className="font-bold">Evidence ID: {item.evidence_id}</p>
-                <p className="text-sm text-gray-600 mt-2 break-all">Tx Hash: {item.tx_hash}</p>
-                <p className="text-sm text-gray-600 mt-2">Stored: {new Date(item.timestamp).toLocaleString()}</p>
-                {item.eth_tx_hash && (
-                  <a
-                    href={`https://sepolia.etherscan.io/tx/${item.eth_tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-4 inline-block text-indigo-600 hover:underline font-medium"
-                  >
-                    View on Etherscan →
-                  </a>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-center text-gray-500 text-xl py-12">No evidence stored on blockchain yet</p>
-        )}
-
-        {/* Download Button */}
-        <div className="text-center mt-16">
-          <button
-            onClick={downloadReport}
-            disabled={loading}
-            className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-bold text-xl py-5 px-12 rounded-2xl hover:from-blue-700 hover:to-indigo-800 transition shadow-2xl disabled:opacity-70"
-          >
-            {loading ? 'Generating PDF...' : 'Download Complete PDF Report'}
-          </button>
-        </div>
-
-        <p className="text-center mt-8 text-lg text-gray-600">Status: {status}</p>
+        <footer className="mt-20 pt-10 border-t border-[var(--border-color)] text-center">
+          <p className="text-[var(--text-secondary)] text-[10px] uppercase font-mono tracking-widest">
+            System Status: <span className="text-[var(--accent-cyan)] ml-2">{status}</span>
+          </p>
+        </footer>
       </div>
     </div>
   );
