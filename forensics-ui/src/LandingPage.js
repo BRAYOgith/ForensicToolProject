@@ -84,6 +84,11 @@ const LandingPage = () => {
                                 ChainForensix was founded to bridge the gap between digital action and real-world recourse. By combining deep forensic crawling of X (Twitter) with cryptographic blockchain anchoring, we ensure that malicious content is preserved permanently, making it impossible to delete or deny the truth.
                             </p>
                         </div>
+                        <div className="mt-8">
+                            <Link to="/methodology" className="text-[var(--accent-cyan)] font-bold uppercase tracking-widest text-sm hover:text-white transition-colors border-b border-[var(--accent-cyan)]/30 pb-1">
+                                Read Full Methodology &rarr;
+                            </Link>
+                        </div>
                         <div className="mt-12 w-px h-16 bg-gradient-to-b from-[var(--accent-cyan)] to-transparent mx-auto"></div>
                     </div>
                 </section>
