@@ -6,6 +6,8 @@ import LoginPage from './LoginPage';
 import ReportPage from './ReportPage';
 import LandingPage from './LandingPage';
 import ResetPasswordPage from './ResetPasswordPage';
+import MethodologyPage from './MethodologyPage';
+import DocumentationPage from './DocumentationPage';
 import './index.css';
 
 function ActivatePage() {
@@ -24,7 +26,7 @@ function ActivatePage() {
 
     const activateAccount = async () => {
       try {
-        const response = await fetch(`https://forensictoolproject.onrender.com/activate?token=${token}`);
+        const response = await fetch(`https://forensic-tool-project.vercel.app/activate?token={token}`);
 
         if (response.ok) {
           setMessage('Account activated successfully! Redirecting to login...');
@@ -132,6 +134,18 @@ function App() {
                     Home
                   </Link>
                   <Link
+                    to="/methodology"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors"
+                  >
+                    Methodology
+                  </Link>
+                  <Link
+                    to="/docs"
+                    className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors"
+                  >
+                    Docs
+                  </Link>
+                  <Link
                     to="/login"
                     className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] font-medium text-lg transition-colors border border-[var(--border-color)] hover:border-[var(--accent-cyan)]/50 px-4 py-1 rounded-full"
                   >
@@ -174,6 +188,8 @@ function App() {
           <div className="w-full max-w-4xl">
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              <Route path="/methodology" element={<MethodologyPage />} />
+              <Route path="/docs" element={<DocumentationPage />} />
               <Route path="/login" element={<LoginPage setIsAuthenticated={setIsAuthenticated} />} />
               <Route path="/activate" element={<ActivatePage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
