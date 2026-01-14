@@ -1,5 +1,4 @@
 import React from 'react';
-import Footer from './Footer';
 
 const TermsPage = () => {
     return (
@@ -26,7 +25,6 @@ const TermsPage = () => {
                     </section>
                 </div>
             </div>
-            <Footer />
         </div>
     );
 };
