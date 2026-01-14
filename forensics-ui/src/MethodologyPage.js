@@ -1,7 +1,4 @@
 import React from 'react';
-import Footer from './Footer';
-// Link removed as it was unused
-
 const MethodologyPage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg-color)] text-[var(--text-primary)] font-sans transition-colors duration-300">
@@ -94,7 +91,7 @@ const MethodologyPage = () => {
                             </p>
                         </div>
                         <div className="w-full md:w-80 bg-[#0A192F] p-6 rounded-lg shadow-inner border border-gray-800 font-mono text-xs overflow-hidden text-cyan-400">
-                            <div className="mb-2 opacity-50">// Evidence Hash Generation</div>
+                            <div className="mb-2 opacity-50">{"// Evidence Hash Generation"}</div>
                             <div className="text-pink-400">const</div> payload = <span className="text-yellow-300">JSON</span>.stringify(data);<br />
                             <div className="text-pink-400">const</div> hash = sha256(payload);<br />
                             <div className="text-green-400 mt-2">{'>>'} Anchor to Ethereum</div>
@@ -112,8 +109,6 @@ const MethodologyPage = () => {
                 </section>
 
             </main>
-
-            <Footer />
         </div>
     );
 };
