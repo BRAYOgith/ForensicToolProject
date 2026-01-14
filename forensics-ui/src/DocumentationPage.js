@@ -1,7 +1,4 @@
 import React from 'react';
-import Footer from './Footer';
-// Link removed as it was unused
-
 const DocumentationPage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg-color)] text-[var(--text-primary)] font-sans transition-colors duration-300">
@@ -83,8 +80,6 @@ const DocumentationPage = () => {
                 </section>
 
             </main>
-
-            <Footer />
         </div>
     );
 };
