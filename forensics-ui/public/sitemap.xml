@@ -2,20 +2,32 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://forensic-tool-project.vercel.app/</loc>
-    <lastmod>2026-01-09</lastmod>
-    <changefreq>weekly</changefreq>
+    <lastmod>2026-01-14</lastmod>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://forensic-tool-project.vercel.app/methodology</loc>
-    <lastmod>2026-01-09</lastmod>
-    <changefreq>monthly</changefreq>
+    <lastmod>2026-01-14</lastmod>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://forensic-tool-project.vercel.app/docs</loc>
-    <lastmod>2026-01-09</lastmod>
-    <changefreq>monthly</changefreq>
+    <lastmod>2026-01-14</lastmod>
     <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://forensic-tool-project.vercel.app/login</loc>
+    <lastmod>2026-01-14</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://forensic-tool-project.vercel.app/privacy</loc>
+    <lastmod>2026-01-14</lastmod>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://forensic-tool-project.vercel.app/terms</loc>
+    <lastmod>2026-01-14</lastmod>
+    <priority>0.3</priority>
   </url>
 </urlset>
