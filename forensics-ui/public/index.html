@@ -60,6 +60,13 @@
     }
   </script>
 
+  <!-- Google Fonts: Playfair Display (Serif) & Inter (Sans) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap"
+    rel="stylesheet">
+
   <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
 </head>
 
@@ -67,64 +74,89 @@
   <noscript>You need to enable JavaScript to run this app.</noscript>
   <div id="root">
     <!-- 
-      STATIC KNOWLEDGE SURFACE (SOLUTION 1) 
-      This content is visible to crawlers and users before React loads.
-      It acts as the "Manual" of the tool.
+      STATIC KNOWLEDGE SURFACE
+      This content is visible to AI agents and search crawlers before JavaScript loads.
+      It serves as a comprehensive, crawlable index of the tool's capabilities.
     -->
     <div
-      style="font-family: sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; line-height: 1.6; color: #333;">
-      <header style="margin-bottom: 40px;">
-        <h1 style="color: #0A192F; font-size: 2.5rem; margin-bottom: 10px;">ChainForensix: Professional X (Twitter)
-          Forensics</h1>
-        <p style="font-size: 1.2rem; color: #555;">The only forensic tool combining high-velocity X post extraction with
-          cryptographic blockchain anchoring.</p>
+      style="font-family: sans-serif; padding: 40px; max-width: 900px; margin: 0 auto; line-height: 1.6; color: #1a1a1a; background: #fff;">
+      <header style="margin-bottom: 50px; border-bottom: 4px solid #0A192F; padding-bottom: 20px;">
+        <h1 style="color: #0A192F; font-size: 2.8rem; margin-bottom: 10px; font-weight: 800;">ChainForensix:
+          Professional X (Twitter) Forensics</h1>
+        <p style="font-size: 1.4rem; color: #444; font-weight: 500;">High-velocity X post extraction combined with
+          cryptographic blockchain anchoring for immutable digital evidence.</p>
+        <nav style="margin-top: 20px;">
+          <a href="/login" style="color: #00bcd4; font-weight: bold; text-decoration: none; margin-right: 25px;">[
+            Analyst Login ]</a>
+          <a href="/methodology" style="color: #00bcd4; font-weight: bold; text-decoration: none; margin-right: 25px;">[
+            Forensic Methodology ]</a>
+          <a href="/docs" style="color: #00bcd4; font-weight: bold; text-decoration: none; margin-right: 25px;">[
+            Documentation ]</a>
+        </nav>
       </header>
 
       <main>
-        <section style="margin-bottom: 30px;">
-          <h2 style="color: #00bcd4; border-bottom: 2px solid #00bcd4; padding-bottom: 10px;">What This Tool Does</h2>
-          <ul style="list-style-type: disc; padding-left: 20px;">
-            <li style="margin-bottom: 10px;"><strong>Forensic Extraction:</strong> Captures the full "digital
-              fingerprint" of X posts, including metadata, server headers, and JSON content.</li>
-            <li style="margin-bottom: 10px;"><strong>Blockchain Anchoring:</strong> Generates a SHA-256 hash of the
-              evidence and anchors it to the Ethereum/Polygon blockchain for immutable proof-of-existence.</li>
-            <li style="margin-bottom: 10px;"><strong>AI Defamation Analysis:</strong> Uses advanced NLP models to scan
-              posts for defamation, hate speech, and harassment patterns.</li>
+        <section style="margin-bottom: 40px;">
+          <h2
+            style="color: #0A192F; font-size: 1.8rem; border-left: 8px solid #00bcd4; padding-left: 15px; margin-bottom: 20px;">
+            What This Tool Does</h2>
+          <ul style="list-style-type: none; padding: 0;">
+            <li style="margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px;">
+              <strong>Forensic Extraction:</strong> We capture the complete "digital fingerprint" of X posts. This
+              includes not just the text, but full metadata, server headers, and raw JSON content often lost in
+              screenshots.
+            </li>
+            <li style="margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px;">
+              <strong>Blockchain Anchoring:</strong> To ensure immutability, we generate a SHA-256 hash of all evidence
+              artifacts and anchor them to the Ethereum/Polygon blockchain. This creates a permanent, third-party
+              proof-of-existence.
+            </li>
+            <li style="margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px;">
+              <strong>AI Defamation Analysis:</strong> Using advanced NLP models, ChainForensix scans captured posts for
+              patterns of defamation, hate speech, and coordinated harassment, providing objective scores for legal
+              dossiers.
+            </li>
           </ul>
         </section>
 
-        <section style="margin-bottom: 30px;">
-          <h2 style="color: #00bcd4; border-bottom: 2px solid #00bcd4; padding-bottom: 10px;">Who It Is For</h2>
-          <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 200px;">
-              <h3 style="color: #0A192F;">Justice Seekers</h3>
-              <p>Victims of online harassment seeking court-admissible evidence.</p>
+        <section style="margin-bottom: 40px;">
+          <h2
+            style="color: #0A192F; font-size: 1.8rem; border-left: 8px solid #00bcd4; padding-left: 15px; margin-bottom: 20px;">
+            Use Cases & Target Audience</h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+            <div style="border: 1px solid #eee; padding: 20px; border-radius: 8px;">
+              <h3 style="color: #00bcd4; margin-top: 0;">Justice Seekers</h3>
+              <p>Victims of online harassment needing court-admissible evidence captured before deletion.</p>
             </div>
-            <div style="flex: 1; min-width: 200px;">
-              <h3 style="color: #0A192F;">Investigators</h3>
-              <p>OSINT professionals requiring verified chain-of-custody.</p>
+            <div style="border: 1px solid #eee; padding: 20px; border-radius: 8px;">
+              <h3 style="color: #00bcd4; margin-top: 0;">Legal Counsel</h3>
+              <p>Attorneys requiring technical, blockchain-verified proof for defamation and libel litigation.</p>
             </div>
-            <div style="flex: 1; min-width: 200px;">
-              <h3 style="color: #0A192F;">Legal Counsel</h3>
-              <p>Attorneys needing technical proof for defamation cases.</p>
+            <div style="border: 1px solid #eee; padding: 20px; border-radius: 8px;">
+              <h3 style="color: #00bcd4; margin-top: 0;">OSINT Investigators</h3>
+              <p>Professionals requiring a verifiable chain-of-custody for digital evidence discovery.</p>
             </div>
           </div>
         </section>
 
-        <section>
-          <h2 style="color: #00bcd4; border-bottom: 2px solid #00bcd4; padding-bottom: 10px;">How It Works</h2>
-          <ol style="padding-left: 20px;">
-            <li style="margin-bottom: 10px;"><strong>Input:</strong> User provides an X post URL.</li>
-            <li style="margin-bottom: 10px;"><strong>Process:</strong> Engine captures the post + metadata and analyzes
-              text with AI.</li>
-            <li style="margin-bottom: 10px;"><strong>Anchor:</strong> Evidence hash is written to the blockchain.</li>
-            <li style="margin-bottom: 10px;"><strong>Output:</strong> A signed PDF/JSON report is generated.</li>
+        <section style="margin-bottom: 40px; padding: 30px; background: #0A192F; color: #fff; border-radius: 12px;">
+          <h2 style="color: #00bcd4; margin-top: 0;">Technical Methodology</h2>
+          <p>Our process follows strict forensic standards:</p>
+          <ol>
+            <li><strong>Ingestion:</strong> Targeted URL acquisition via high-velocity scraping.</li>
+            <li><strong>Verification:</strong> Automatic verification of data integrity via cryptographic hashing.</li>
+            <li><strong>Persistence:</strong> Evidence anchoring to public ledgers (Blockchain).</li>
+            <li><strong>Reporting:</strong> Generation of cryptographic forensic reports in PDF and JSON formats.</li>
           </ol>
         </section>
       </main>
 
-      <footer style="margin-top: 50px; font-size: 0.9rem; color: #888; border-top: 1px solid #eee; padding-top: 20px;">
-        <p>&copy; 2026 ChainForensix. Created by Brian Njoki.</p>
+      <footer style="margin-top: 60px; padding-top: 30px; border-top: 1px solid #eee; font-size: 0.9rem; color: #777;">
+        <p>&copy; 2026 ChainForensix. Created by Brian Njoki. All rights reserved.</p>
+        <nav>
+          <a href="/privacy" style="color: #999; text-decoration: none; margin-right: 15px;">Privacy Policy</a>
+          <a href="/terms" style="color: #999; text-decoration: none;">Terms of Service</a>
+        </nav>
       </footer>
     </div>
   </div>
