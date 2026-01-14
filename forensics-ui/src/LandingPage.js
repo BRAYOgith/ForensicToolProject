@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Footer from './Footer';
 
 const LandingPage = () => {
     const [hoveredPointSeeker, setHoveredPointSeeker] = useState(null);
@@ -421,8 +420,6 @@ const LandingPage = () => {
                     </div>
                 </section>
             </main>
-
-            <Footer />
         </div>
     );
 };
