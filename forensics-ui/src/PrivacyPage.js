@@ -1,5 +1,4 @@
 import React from 'react';
-import Footer from './Footer';
 
 const PrivacyPage = () => {
     return (
@@ -31,7 +30,6 @@ const PrivacyPage = () => {
                     </section>
                 </div>
             </div>
-            <Footer />
         </div>
     );
 };
