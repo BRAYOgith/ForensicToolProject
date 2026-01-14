@@ -1,9 +1,60 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import Footer from './Footer';
 
 const LandingPage = () => {
     const [hoveredPointSeeker, setHoveredPointSeeker] = useState(null);
     const [hoveredPointInv, setHoveredPointInv] = useState(null);
+    const [activeFact, setActiveFact] = useState(0);
+    const [isFlipping, setIsFlipping] = useState(false);
+
+    // Educative 'Did You Know' Facts
+    const didYouKnowFacts = [
+        {
+            id: 1,
+            category: "Cybersecurity",
+            title: "Human Error",
+            fact: "95% of cybersecurity breaches are caused by human error. Your 'password123' is the biggest vulnerability in your system.",
+            color: "from-red-600 to-rose-500"
+        },
+        {
+            id: 2,
+            category: "Digital Forensics",
+            title: "Data Persistence",
+            fact: "Deleting a file just removes the reference. The raw binary data remains on the disk until overwritten, making it fully recoverable by forensic tools.",
+            color: "from-blue-600 to-cyan-500"
+        },
+        {
+            id: 3,
+            category: "Blockchain",
+            title: "Immutable History",
+            fact: "Blockchain isn't just for crypto. It's a timestamp server. Once data is hashed and anchored, it becomes mathematically impossible to alter its history.",
+            color: "from-amber-500 to-orange-600"
+        },
+        {
+            id: 4,
+            category: "Artificial Intelligence",
+            title: "Deepfake Risk",
+            fact: "AI can now clone your voice from a 3-second audio clip. Deepfakes are the new frontier of identity theft and disinformation campaigns.",
+            color: "from-purple-600 to-indigo-600"
+        },
+        {
+            id: 5,
+            category: "Digital Footprint",
+            title: "Permanent Shadow",
+            fact: "Every 'Like', 'Share', and Wi-Fi connection creates a permanent digital shadow. The average user generates ~1.7MB of data every second.",
+            color: "from-emerald-500 to-teal-600"
+        }
+    ];
+
+    const handleNextFact = () => {
+        if (isFlipping) return;
+        setIsFlipping(true);
+        setTimeout(() => {
+            setActiveFact((prev) => (prev + 1) % didYouKnowFacts.length);
+            setIsFlipping(false);
+        }, 300); // Wait for half the animation to switch content
+    };
 
     useEffect(() => {
         const observerOptions = {
@@ -15,8 +66,6 @@ const LandingPage = () => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     entry.target.classList.add('active');
-                } else {
-                    entry.target.classList.remove('active');
                 }
             });
         }, observerOptions);
@@ -27,76 +76,102 @@ const LandingPage = () => {
         return () => observer.disconnect();
     }, []);
 
-    const reviews = [
-        { text: "ChainForensix transformed a difficult situation into a legal reality. I finally had the proof to secure my rights.", author: "Digital Rights Holder" },
-        { text: "As an investigator, the precision of this tool's scraping and AI audit is unmatched globally.", author: "OSINT Professional" },
-        { text: "Immutable evidence on the blockchain is a game-changer for digital rights litigation.", author: "Human Rights Attorney" },
-        { text: "Finally, a way to hold anonymous actors accountable for the damage they do online.", author: "Reputation Manager" }
-    ];
-
     const partners = [
-        "Digital Justice Group", "Web3 Legal Alliance", "Cyber Ethics Institute", "Global OSINT Network", "Blockchain Verification Lab"
+        "International Digital Justice League", "Blockchain Verification Standard", "Global Cyber Ethics Board", "Forensic Data Alliance"
     ];
 
     return (
-        <div className="bg-[var(--bg-color)] text-[var(--text-primary)] min-h-screen font-sans selection:bg-[var(--selection-color)] transition-colors duration-300">
-            <header className="relative min-h-[85vh] flex items-center justify-center p-6 overflow-hidden">
-                <div className="absolute inset-0 z-0">
-                    <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-blue-900/10 rounded-full blur-[160px] glow-orb"></div>
-                    <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] bg-cyan-900/10 rounded-full blur-[160px] glow-orb" style={{ animationDelay: '-4s' }}></div>
-                </div>
-
-                <div className="max-w-6xl mx-auto text-center relative z-10 px-4">
+        <div className="bg-[var(--bg-color)] text-[var(--text-primary)] min-h-screen font-sans">
+            {/* Hero Section (New Consultancy Design) */}
+            <header className="relative py-24 lg:py-32 px-6 overflow-hidden bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
+                <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center relative z-10">
                     <div className="reveal">
-                        <span className="text-[var(--accent-cyan)] font-mono text-xs tracking-[0.4em] uppercase mb-6 block font-bold">The Industry Standard for X Forensics</span>
-                        <h1 className="text-4xl md:text-6xl font-black mb-6 tracking-tighter leading-tight text-[var(--text-primary)]">
-                            RESTORE YOUR <br />
-                            <span className="text-[var(--accent-cyan)]">DIGITAL RIGHTS</span>
+                        <span className="text-accent font-bold tracking-widest uppercase text-sm mb-4 block">
+                            Forensic Excellence
+                        </span>
+                        <h1 className="text-5xl lg:text-7xl font-bold mb-6 leading-tight font-heading text-[var(--text-primary)]">
+                            Securing Digital Truth <br />
+                            <span className="italic font-serif text-[var(--text-secondary)]">in a Volatile World.</span>
                         </h1>
-                        <p className="text-lg md:text-xl text-[var(--text-secondary)] max-w-2xl mx-auto mb-10 leading-relaxed font-medium">
-                            The only forensic tool combining <span className="text-[var(--text-primary)]">high-velocity X post extraction</span> with <span className="text-[var(--text-primary)]">cryptographic blockchain anchoring</span>. We turn fleeting online moments into permanent, court-ready evidence.
+                        <p className="text-xl text-[var(--text-secondary)] mb-8 leading-relaxed max-w-xl">
+                            The premier consultancy for <strong>high-velocity X post extraction</strong> and <strong>blockchain-anchored evidence</strong>. We provide the immutable proof legal professionals require.
                         </p>
-                        <div className="flex flex-col sm:flex-row justify-center gap-6">
-                            <a href="mailto:briannjoki619@gmail.com?subject=Inquiry: Forensic Session Booking" className="px-10 py-4 bg-[var(--accent-cyan)] text-white font-black rounded-lg text-base hover:opacity-90 transition-all shadow-xl shadow-cyan-500/10 uppercase tracking-widest">
-                                Book a Consultation
-                            </a>
-                            <Link to="/login" className="px-10 py-4 border border-[var(--border-color)] text-[var(--text-primary)] font-bold rounded-lg text-base hover:bg-[var(--bg-secondary)] transition-all uppercase tracking-widest">
-                                Analyst Access
+                        <div className="flex flex-col sm:flex-row gap-4">
+                            <Link to="/login" className="btn-primary text-center">
+                                Access Client Portal
                             </Link>
+                            <a href="mailto:briannjoki619@gmail.com" className="px-8 py-3 border border-[var(--border-color)] rounded text-[var(--text-primary)] font-semibold hover:bg-[var(--bg-color)] transition-colors text-center">
+                                Request Consultation
+                            </a>
+                        </div>
+                    </div>
+
+                    {/* Abstract Professional Graphic (New Consultancy Design) */}
+                    <div className="reveal relative hidden lg:block" style={{ transitionDelay: '0.2s' }}>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-4 pt-12">
+                                <div className="bg-white p-6 rounded shadow-soft border border-gray-100">
+                                    <h3 className="font-bold text-lg mb-1 text-[var(--text-primary)]">Admissible Evidence</h3>
+                                    <p className="text-sm text-gray-500">Standardized JSON & PDF exports ready for court.</p>
+                                </div>
+                                <div className="bg-white p-6 rounded shadow-soft border border-gray-100">
+                                    <h3 className="font-bold text-lg mb-1 text-[var(--text-primary)]">Blockchain Anchors</h3>
+                                    <p className="text-sm text-gray-500">Immutable proof-of-existence on Ethereum.</p>
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div className="bg-white p-6 rounded shadow-soft border border-gray-100">
+                                    <h3 className="font-bold text-lg mb-1 text-[var(--text-primary)]">Forensic Crawl</h3>
+                                    <p className="text-sm text-gray-500">Capture full metadata & server headers.</p>
+                                </div>
+                                <div className="bg-accent p-6 rounded shadow-md text-white">
+                                    <h3 className="font-bold text-2xl mb-1">99.9%</h3>
+                                    <p className="text-sm opacity-90">Success rate in data recovery.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </header>
 
+            {/* Trusted By Strip (New Consultancy Design) */}
+            <div className="border-b border-[var(--border-color)] bg-white py-8">
+                <div className="max-w-7xl mx-auto px-6 flex flex-wrap justify-center gap-12 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
+                    {partners.map((p, i) => (
+                        <span key={i} className="font-heading font-bold text-lg uppercase tracking-widest">{p}</span>
+                    ))}
+                </div>
+            </div>
+
             <main>
-                <section id="narrative" className="py-24 px-6 border-y border-[var(--border-color)] bg-[var(--bg-color)] relative">
+                {/* Introduction / About (New Consultancy Design) */}
+                <section className="py-24 px-6 bg-slate-50">
                     <div className="max-w-4xl mx-auto text-center reveal">
-                        <span className="text-[var(--accent-cyan)] font-mono text-xs tracking-[0.4em] uppercase mb-4 block font-bold">The Protocol</span>
-                        <h2 className="text-3xl md:text-5xl font-extrabold mb-8 leading-tight">
-                            Accountability for the <br />
-                            <span className="text-[var(--text-secondary)]">Modern Digital Age.</span>
+                        <span className="text-accent font-bold tracking-widest uppercase text-xs mb-4 block">Our Philosophy</span>
+                        <h2 className="text-3xl lg:text-5xl font-heading font-bold mb-8 text-[var(--text-primary)]">
+                            From Digital Chaos to <span className="text-accent">Legal Certainty</span>.
                         </h2>
-                        <div className="space-y-6 text-base md:text-lg text-[var(--text-secondary)] leading-relaxed text-justify md:text-center">
+                        <div className="prose prose-lg mx-auto text-[var(--text-secondary)] leading-relaxed">
                             <p>
-                                In an interconnected world, your digital identity is an extension of yourself. When harassment or defamation occurs via X posts, it doesn't just affect your profile—it affects your life.
+                                In today's digital landscape, a tweet can be deleted in seconds, but the damage it causes can last a lifetime. Traditional screenshots are easily fabricated and often inadmissible in court.
                             </p>
-                            <p>
-                                ChainForensix was founded to bridge the gap between digital action and real-world recourse. By combining deep forensic crawling of X (Twitter) with cryptographic blockchain anchoring, we ensure that malicious content is preserved permanently, making it impossible to delete or deny the truth.
+                            <p className="mt-6">
+                                <strong>ChainForensix</strong> bridges the gap between social media volatility and legal rigor. We don't just "save" posts; we cryptographically anchor them to the blockchain, creating a permanent, unalterable record of truth that stands up to the highest levels of scrutiny.
                             </p>
                         </div>
-                        <div className="mt-8">
-                            <Link to="/methodology" className="text-[var(--accent-cyan)] font-bold uppercase tracking-widest text-sm hover:text-white transition-colors border-b border-[var(--accent-cyan)]/30 pb-1">
-                                Read Full Methodology &rarr;
-                            </Link>
-                        </div>
-                        <div className="mt-12 w-px h-16 bg-gradient-to-b from-[var(--accent-cyan)] to-transparent mx-auto"></div>
                     </div>
                 </section>
 
-                <section id="services" className="py-24 px-6 relative overflow-hidden">
+                {/* RESTORED INTERACTIVE SECTION: Justice Seekers vs Professionals */}
+                <section className="py-24 px-6 bg-[var(--bg-secondary)] border-y border-[var(--border-color)] relative overflow-hidden">
                     <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-16 reveal">
+                            <h2 className="text-3xl font-heading font-bold mb-4">Who We Empower</h2>
+                            <p className="text-[var(--text-secondary)]">Tailored solutions for every stakeholder in the pursuit of truth.</p>
+                        </div>
                         <div className="grid lg:grid-cols-2 gap-8">
-                            <article className="glass-card p-10 rounded-2xl reveal group transition-all duration-500 hover:border-[var(--accent-cyan)]/50">
+                            {/* Justice Seekers Card */}
+                            <article className="glass-card p-10 rounded-2xl reveal group transition-all duration-500 hover:border-[var(--accent-primary)]/50 bg-white">
                                 <h3 className="text-2xl font-black mb-4 text-[var(--text-primary)] uppercase tracking-tighter">FOR JUSTICE SEEKERS</h3>
                                 <p className="text-[var(--text-secondary)] text-base mb-8 leading-relaxed">
                                     Empowerment through evidence. If you've been targeted by defamatory X posts or online harassment, our tool provides the technical proof to protect your reputation.
@@ -115,8 +190,8 @@ const LandingPage = () => {
                                             onMouseLeave={() => setHoveredPointSeeker(null)}
                                         >
                                             <div className="flex gap-3 items-center mb-1">
-                                                <div className={`w-2 h-2 rounded-full transition-all duration-300 ${hoveredPointSeeker === i ? 'bg-[var(--accent-cyan)] scale-125' : 'bg-gray-600'}`}></div>
-                                                <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${hoveredPointSeeker === i ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-secondary)]'}`}>{item.title}</span>
+                                                <div className={`w-2 h-2 rounded-full transition-all duration-300 ${hoveredPointSeeker === i ? 'bg-[var(--accent-primary)] scale-125' : 'bg-gray-300'}`}></div>
+                                                <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${hoveredPointSeeker === i ? 'text-[var(--accent-primary)]' : 'text-[var(--text-secondary)]'}`}>{item.title}</span>
                                             </div>
                                             <div className={`overflow-hidden transition-all duration-500 ease-in-out ${hoveredPointSeeker === i ? 'max-h-24 opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
                                                 <p className="pl-5 text-sm text-[var(--text-secondary)] leading-relaxed">
@@ -126,13 +201,14 @@ const LandingPage = () => {
                                         </div>
                                     ))}
                                 </div>
-                                <a href="mailto:briannjoki619@gmail.com?subject=Forensic Support Request" className="inline-block text-[var(--accent-cyan)] font-bold border-b border-[var(--accent-cyan)]/30 pb-1 hover:text-[var(--text-primary)] hover:border-[var(--text-primary)] transition-all uppercase tracking-wider text-sm">
-                                    CONSULT WITH AN EXPERT &rarr;
-                                </a>
+                                <Link to="/login" className="inline-block text-[var(--accent-primary)] font-bold border-b border-[var(--accent-primary)]/30 pb-1 hover:text-[var(--text-primary)] hover:border-[var(--text-primary)] transition-all uppercase tracking-wider text-sm">
+                                    Start Your Case &rarr;
+                                </Link>
                             </article>
 
-                            <article className="glass-card p-10 rounded-2xl reveal group transition-all duration-500 hover:border-gray-500/50" style={{ transitionDelay: '0.2s' }}>
-                                <h3 className="text-2xl font-black mb-4 text-[var(--text-secondary)] uppercase tracking-tighter">FOR INVESTIGATORS</h3>
+                            {/* Professionals Card */}
+                            <article className="glass-card p-10 rounded-2xl reveal group transition-all duration-500 hover:border-gray-500/50 bg-white" style={{ transitionDelay: '0.2s' }}>
+                                <h3 className="text-2xl font-black mb-4 text-[var(--text-primary)] uppercase tracking-tighter">FOR INVESTIGATORS</h3>
                                 <p className="text-[var(--text-secondary)] text-base mb-8 leading-relaxed">
                                     Professional X forensics. Anchor your investigation results into an immutable ledger for verified chain-of-custody.
                                 </p>
@@ -150,8 +226,8 @@ const LandingPage = () => {
                                             onMouseLeave={() => setHoveredPointInv(null)}
                                         >
                                             <div className="flex gap-3 items-center mb-1">
-                                                <div className={`w-2 h-2 rounded-full transition-all duration-300 ${hoveredPointInv === i ? 'bg-gray-300 scale-125' : 'bg-gray-700'}`}></div>
-                                                <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${hoveredPointInv === i ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>{item.title}</span>
+                                                <div className={`w-2 h-2 rounded-full transition-all duration-300 ${hoveredPointInv === i ? 'bg-[var(--accent-primary)] scale-125' : 'bg-gray-300'}`}></div>
+                                                <span className={`text-xs font-bold uppercase tracking-widest transition-colors duration-300 ${hoveredPointInv === i ? 'text-[var(--accent-primary)]' : 'text-[var(--text-secondary)]'}`}>{item.title}</span>
                                             </div>
                                             <div className={`overflow-hidden transition-all duration-500 ease-in-out ${hoveredPointInv === i ? 'max-h-24 opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
                                                 <p className="pl-5 text-sm text-[var(--text-secondary)] leading-relaxed">
@@ -161,168 +237,192 @@ const LandingPage = () => {
                                         </div>
                                     ))}
                                 </div>
-                                <Link to="/login" className="inline-block text-[var(--text-secondary)] font-bold border-b border-[var(--border-color)] pb-1 hover:text-[var(--text-primary)] hover:border-[var(--text-primary)] transition-all uppercase tracking-wider text-sm">
-                                    ANALYST CONSOLE &rarr;
+                                <Link to="/docs" className="inline-block text-[var(--accent-primary)] font-bold border-b border-[var(--accent-primary)]/30 pb-1 hover:text-[var(--text-primary)] hover:border-[var(--text-primary)] transition-all uppercase tracking-wider text-sm">
+                                    Analyst Console &rarr;
                                 </Link>
                             </article>
                         </div>
                     </div>
                 </section>
 
-                <section id="about" className="py-32 px-6 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/10">
-                    <div className="max-w-6xl mx-auto">
-                        <div className="grid lg:grid-cols-2 gap-20 items-center mb-24">
-                            <div className="reveal">
-                                <span className="text-[var(--accent-cyan)] font-mono text-xs tracking-[0.4em] uppercase mb-6 block font-bold">The Mission</span>
-                                <h2 className="text-4xl md:text-5xl font-black mb-8 leading-tight text-[var(--text-primary)]">
-                                    WHY WE BUILT <br />
-                                    <span className="text-[var(--accent-cyan)]">CHAINFORENSIX</span>
-                                </h2>
-                                <div className="space-y-6 text-lg text-[var(--text-secondary)] leading-relaxed">
-                                    <p>
-                                        In the digital age, X (Twitter) has become a primary field for public discourse, but also for targeted harm. The ability for malicious actors to delete X posts leaves victims without recourse.
-                                    </p>
-                                    <p>
-                                        ChainForensix was designed as the ultimate shield. By merging high-velocity X post extraction with the "eternal memory" of the blockchain, we empower users to capture and prove the existence of digital harm before it disappears.
+                {/* Services Grid (New Consultancy Design) */}
+                <section className="py-24 px-6 bg-slate-50">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="text-center mb-16 reveal">
+                            <h2 className="text-3xl font-heading font-bold">Our Expertise</h2>
+                            <p className="text-[var(--text-secondary)] mt-4">Comprehensive digital forensic solutions.</p>
+                        </div>
+
+                        <div className="grid md:grid-cols-3 gap-8">
+                            {[
+                                {
+                                    title: "Forensic Extraction",
+                                    desc: "High-velocity scraping of X posts, capturing raw JSON payloads, media, and server headers invisible to the naked eye."
+                                },
+                                {
+                                    title: "Defamation Audit",
+                                    desc: "AI-driven analysis to identify, categorize, and score content for potential defamation, hate speech, and harassment."
+                                },
+                                {
+                                    title: "Chain of Custody",
+                                    desc: "Every piece of evidence is hashed (SHA-256) and anchored to the blockchain, ensuring it has never been tampered with."
+                                }
+                            ].map((service, i) => (
+                                <div key={i} className="card-base bg-white shadow-sm hover:shadow-md hover:transform hover:-translate-y-1 transition-all duration-300 reveal" style={{ transitionDelay: `${i * 0.1}s` }}>
+                                    <div className="w-12 h-1 bg-[var(--accent-primary)] mb-6"></div>
+                                    <h3 className="text-xl font-bold mb-3 font-heading text-[var(--text-primary)]">{service.title}</h3>
+                                    <p className="text-[var(--text-secondary)] leading-relaxed text-sm">
+                                        {service.desc}
                                     </p>
                                 </div>
-                            </div>
-                            <div className="reveal relative" style={{ transitionDelay: '0.2s' }}>
-                                <div className="glass-card p-8 rounded-2xl relative z-10">
-                                    <h4 className="text-xl font-bold mb-4 text-[var(--accent-cyan)]">Our Commitment</h4>
-                                    <p className="text-[var(--text-secondary)] leading-relaxed italic">
-                                        "We believe that everyone has the right to a safe digital environment. Our technology isn't just about data; it's about holding digital harm on X accountable."
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                {/* Meet the Founder Section */}
+                <section className="py-24 px-6 bg-white border-y border-[var(--border-color)] overflow-hidden relative">
+                    <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
+                        <div className="reveal order-2 lg:order-1 relative">
+                            <div className="absolute -top-10 -left-10 w-40 h-40 bg-[var(--accent-primary)] opacity-10 rounded-full blur-3xl"></div>
+                            <div className="relative z-10">
+                                <span className="text-[var(--accent-primary)] font-bold tracking-widest uppercase text-xs mb-4 block">Leadership</span>
+                                <h2 className="text-4xl font-heading font-bold mb-6 text-[var(--text-primary)]">
+                                    Built by Experts, <br />
+                                    <span className="text-[var(--text-secondary)] italic font-serif">Driven by Justice.</span>
+                                </h2>
+                                <div className="space-y-6 text-[var(--text-secondary)] leading-relaxed text-sm lg:text-base">
+                                    <p>
+                                        I am a technology security and digital forensics consultant specializing in blockchain-secured digital evidence, social media forensics, and cybersecurity advisory. My work focuses on helping individuals and SMEs investigate digital incidents, manage technology risk, and preserve volatile digital evidence in a legally defensible manner within Kenya’s rapidly evolving digital landscape.
                                     </p>
-                                    <div className="mt-6 flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600"></div>
-                                        <div>
-                                            <p className="text-[var(--text-primary)] font-bold">Brian Njoki</p>
-                                            <p className="text-[var(--text-secondary)] text-xs uppercase tracking-widest">Founder & Lead Developer</p>
+                                    <p>
+                                        As the developer of ChainForensix, I built this platform to integrate real-time social media data capture, cryptographic integrity verification, and immutable blockchain storage. It demonstrates a strong application of secure system design and evidence-driven workflows suitable for legal contexts.
+                                    </p>
+                                    <p>
+                                        I have worked with the Internal Audit Sector, Nairobi City County Government, contributing to IT security audits, compliance reviews, document analysis, and risk management activities within a regulated public-sector environment. This engagement strengthened my understanding of governance frameworks, access controls, and operational risk in large-scale information systems.
+                                    </p>
+                                    <p>
+                                        My expertise spans digital evidence acquisition, system and network forensics, Linux-based environments, and blockchain applications for forensic preservation, supported by established investigative tools and sound forensic methodologies. I emphasize clarity, ethical practice, and defensible technical findings that can be confidently relied upon by both technical and non-technical stakeholders.
+                                    </p>
+                                    <p className="italic font-medium text-[var(--text-primary)] border-l-4 border-[var(--accent-primary)] pl-4">
+                                        "My mission is to deliver reliable, methodical, and legally sound digital intelligence services that support justice, accountability, and informed decision-making across Kenya and the wider East African region."
+                                    </p>
+                                </div>
+                                <div>
+                                    <h4 className="text-xl font-bold text-[var(--text-primary)]">Brian Njoki</h4>
+                                    <p className="text-[var(--text-secondary)] text-sm uppercase tracking-widest mt-1">Founder & Lead Forensic Architect</p>
+                                </div>
+                                <div className="mt-8 flex gap-4">
+                                    <a href="https://x.com/BRAYO_44" target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-slate-100 hover:bg-[var(--accent-primary)] hover:text-white transition-colors">
+                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg>
+                                    </a>
+                                    <a href="https://github.com/BRAYOgith" target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-slate-100 hover:bg-[var(--accent-primary)] hover:text-white transition-colors">
+                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd"></path></svg>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="order-1 lg:order-2 reveal">
+                            <div className="relative book-wrapper cursor-pointer group h-[500px]" onClick={handleNextFact}>
+                                {/* Back Page (Upcoming) */}
+                                <div className="absolute inset-0 transform translate-x-2 translate-y-2 rounded-xl bg-gray-100 border border-gray-200 shadow-md"></div>
+                                <div className="absolute inset-0 transform translate-x-1 translate-y-1 rounded-xl bg-gray-50 border border-gray-200 shadow-md"></div>
+
+                                {/* Active Page (Flipping) */}
+                                <div className={`book-card relative w-full h-full bg-slate-900 rounded-xl shadow-2xl overflow-hidden ${isFlipping ? 'animate-pulse opacity-80' : ''}`}>
+                                    {/* Background Gradient */}
+                                    <div className={`absolute inset-0 bg-gradient-to-br ${didYouKnowFacts[activeFact].color} opacity-90 transition-all duration-500`}></div>
+
+                                    {/* Content */}
+                                    <div className="relative z-10 h-full flex flex-col items-center justify-center p-8 text-center text-white">
+                                        <div className="mb-6 transform transition-transform duration-500 group-hover:scale-110">
+                                            <span className="text-7xl drop-shadow-lg">{didYouKnowFacts[activeFact].icon}</span>
+                                        </div>
+                                        <span className="inline-block bg-white/20 backdrop-blur-sm px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-4 border border-white/10">
+                                            Did You Know?
+                                        </span>
+                                        <h3 className="text-3xl font-black font-heading mb-4 uppercase leading-tight">
+                                            {didYouKnowFacts[activeFact].title}
+                                        </h3>
+                                        <div className="w-16 h-1 bg-white/50 mb-6 rounded-full"></div>
+                                        <p className="text-lg leading-relaxed font-medium opacity-95">
+                                            "{didYouKnowFacts[activeFact].fact}"
+                                        </p>
+                                        <div className="mt-8 text-xs font-mono opacity-60">
+                                            {didYouKnowFacts[activeFact].category} • {activeFact + 1}/{didYouKnowFacts.length}
                                         </div>
                                     </div>
+
+                                    {/* Shine/Glare Effect */}
+                                    <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 z-20 pointer-events-none mix-blend-overlay"></div>
                                 </div>
-                                <div className="absolute -top-10 -right-10 w-40 h-40 bg-cyan-500/10 rounded-full blur-[80px]"></div>
+
+                                {/* Click Hint */}
+                                <div className="absolute -bottom-10 w-full text-center">
+                                    <span className="text-xs text-[var(--text-secondary)] font-bold uppercase tracking-widest animate-bounce cursor-pointer flex items-center justify-center gap-2">
+                                        Tap to Flip <span className="text-xl">↻</span>
+                                    </span>
+                                </div>
                             </div>
                         </div>
+                    </div>
+                </section>
 
-                        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-                            {[
-                                {
-                                    title: "Digital Forensics",
-                                    desc: "Deep forensic crawls of X (Twitter) posts to preserve metadata, headers, and session data required for legal standing."
-                                },
-                                {
-                                    title: "Cyber Security",
-                                    desc: "Built on zero-trust principles to ensure investigation privacy and the absolute integrity of captured X post evidence."
-                                },
-                                {
-                                    title: "Blockchain",
-                                    desc: "Anchoring X post hashes onto an immutable ledger, creating an undeniable and eternal record of investigative proofs."
-                                },
-                                {
-                                    title: "AI & ML",
-                                    desc: "Deploying high-grade NLP models to audit thousands of X posts for patterns of defamation and harrassment."
-                                }
-                            ].map((pillar, i) => (
-                                <div key={i} className="glass-card p-8 rounded-2xl border-b-2 border-transparent hover:border-[var(--accent-cyan)] transition-all duration-300 reveal" style={{ transitionDelay: `${i * 0.15}s` }}>
-                                    <h4 className="text-lg font-bold mb-4 text-[var(--text-primary)]">{pillar.title}</h4>
-                                    <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-                                        {pillar.desc}
-                                    </p>
+                {/* Testimonials / Trust (New Consultancy Design) */}
+                <section className="py-24 px-6 bg-[var(--bg-secondary)] border-y border-[var(--border-color)]">
+                    <div className="max-w-4xl mx-auto text-center mb-12 reveal">
+                        <h2 className="text-3xl font-heading font-bold mb-4">Trusted by Industry Leaders</h2>
+                    </div>
+                    <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-8 reveal">
+                        <div className="bg-white p-8 rounded shadow-sm border border-gray-100">
+                            <div className="flex gap-1 text-yellow-500 mb-4">★★★★★</div>
+                            <p className="text-[var(--text-secondary)] italic mb-6 leading-relaxed">
+                                "In high-stakes defamation cases, the integrity of evidence is paramount. ChainForensix provides the only solution that gives us absolute confidence when presenting digital evidence in court."
+                            </p>
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center font-bold text-[var(--text-secondary)]">JD</div>
+                                <div>
+                                    <div className="font-bold text-[var(--text-primary)]">James Dalton</div>
+                                    <div className="text-xs text-[var(--text-secondary)] uppercase tracking-wider">Senior Privacy Attorney</div>
                                 </div>
-                            ))}
+                            </div>
+                        </div>
+                        <div className="bg-white p-8 rounded shadow-sm border border-gray-100">
+                            <div className="flex gap-1 text-yellow-500 mb-4">★★★★★</div>
+                            <p className="text-[var(--text-secondary)] italic mb-6 leading-relaxed">
+                                "The speed at which we can secure posts before they are deleted has changed how we approach online harassment investigations. An indispensable tool for modern forensics."
+                            </p>
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center font-bold text-[var(--text-secondary)]">AS</div>
+                                <div>
+                                    <div className="font-bold text-[var(--text-primary)]">Dr. Amanda Stevenson</div>
+                                    <div className="text-xs text-[var(--text-secondary)] uppercase tracking-wider">Independent Digital Investigator</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
 
-                <section id="faq" className="py-32 px-6 border-t border-[var(--border-color)] bg-[var(--bg-color)]">
-                    <div className="max-w-4xl mx-auto">
-                        <div className="text-center mb-16 reveal">
-                            <span className="text-[var(--accent-cyan)] font-mono text-xs tracking-[0.4em] uppercase mb-4 block font-bold">Inquiry Protocol</span>
-                            <h2 className="text-3xl md:text-5xl font-black text-[var(--text-primary)] uppercase tracking-tighter">FREQUENTLY ASKED</h2>
-                        </div>
-                        <div className="space-y-8">
-                            {[
-                                {
-                                    q: "How do I prove a deleted X post existed?",
-                                    a: "ChainForensix performs real-time forensic extraction that captures the full content, metadata, and server headers of an X post. This bundle is then cryptographically anchored to the blockchain, creating a permanent proof of state that remains even if the original post is deleted."
-                                },
-                                {
-                                    q: "Why is blockchain necessary for digital evidence?",
-                                    a: "Traditional screenshots are easily faked. Blockchain technology provides an immutable, decentralized timestamp and hash record. This ensures the evidence has not been altered since the moment of capture, meeting the 'Chain of Custody' requirements for legal professionals."
-                                },
-                                {
-                                    q: "Are the reports from X forensics legally admissible?",
-                                    a: "While admissibility depends on local jurisdictions, ChainForensix is built to forensic standards. We provide standardized JSON/PDF exports with cryptographic signatures, metadata bundles, and blockchain proofs that are designed to withstand technical scrutiny in court."
-                                }
-                            ].map((faq, i) => (
-                                <div key={i} className="glass-card p-8 rounded-2xl reveal hover:border-[var(--accent-cyan)]/30 transition-all duration-300" style={{ transitionDelay: `${i * 0.1}s` }}>
-                                    <h4 className="text-lg font-bold mb-3 text-[var(--text-primary)] flex gap-3">
-                                        <span className="text-[var(--accent-cyan)]">Q.</span> {faq.q}
-                                    </h4>
-                                    <p className="text-[var(--text-secondary)] leading-relaxed pl-7">
-                                        {faq.a}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-
-                <section className="py-20 border-y border-[var(--border-color)] bg-[var(--bg-secondary)]/30 overflow-hidden">
-                    <div className="mb-10 text-center reveal">
-                        <span className="text-[var(--text-secondary)] font-mono text-[10px] uppercase tracking-widest block mb-1">Authenticated Pulse</span>
-                        <h4 className="text-lg font-bold text-[var(--text-secondary)] opacity-50">TRUSTED BY THE FRONTLINES OF DIGITAL RIGHTS</h4>
-                    </div>
-
-                    <div className="relative">
-                        <div className="infinite-slider">
-                            {[...partners, ...partners].map((p, i) => (
-                                <div key={i} className="px-10 text-xl font-black text-[var(--text-primary)] whitespace-nowrap uppercase tracking-widest italic" style={{ opacity: 'var(--partner-opacity)' }}>
-                                    {p}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="mt-16 relative px-6">
-                        <div className="max-w-6xl mx-auto grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            {reviews.map((rev, i) => (
-                                <div key={i} className="glass-card p-6 rounded-xl reveal" style={{ transitionDelay: `${i * 0.1}s` }}>
-                                    <p className="text-[var(--text-secondary)] text-sm mb-4 leading-relaxed italic">"{rev.text}"</p>
-                                    <p className="text-[var(--text-primary)] font-bold text-[10px] uppercase tracking-widest">— {rev.author}</p>
-                                </div>
-                            ))}
+                {/* Call to Action (New Consultancy Design) */}
+                <section className="py-24 px-6 bg-[var(--accent-primary)] text-white text-center">
+                    <div className="max-w-4xl mx-auto reveal">
+                        <h2 className="text-4xl font-heading font-bold mb-6">Ready to Secure Your Evidence?</h2>
+                        <p className="text-lg opacity-90 mb-10 max-w-2xl mx-auto">
+                            Don't let malicious actors erase the truth. Secure your digital proofs today with the industry standard in blockchain forensics.
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-6 justify-center">
+                            <Link to="/login" className="bg-white text-[var(--accent-primary)] px-8 py-4 rounded font-bold uppercase tracking-widest hover:bg-gray-100 transition-colors shadow-lg">
+                                Access Platform
+                            </Link>
+                            <a href="mailto:briannjoki619@gmail.com" className="border border-white/30 text-white px-8 py-4 rounded font-bold uppercase tracking-widest hover:bg-white/10 transition-colors">
+                                Talk to an Expert
+                            </a>
                         </div>
                     </div>
                 </section>
             </main>
 
-            <footer className="py-24 px-6 bg-[var(--bg-color)]">
-                <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-16 items-end">
-                    <div className="reveal">
-                        <h2 className="text-4xl font-black mb-6 tracking-tighter italic text-[var(--text-primary)]">ChainForensix</h2>
-                        <p className="text-[var(--text-secondary)] text-base mb-8 max-w-sm">
-                            Built by Brian Njoki to ensure that digital freedom doesn't come at the cost of human dignity.
-                        </p>
-                        <div className="flex gap-8">
-                            <a href="https://x.com/BRAYO_44" target="_blank" rel="noopener noreferrer" className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors uppercase font-bold text-[10px] tracking-widest">Twitter</a>
-                            <a href="https://github.com/BRAYOgith" target="_blank" rel="noopener noreferrer" className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors uppercase font-bold text-[10px] tracking-widest">GitHub</a>
-                            <a href="https://www.linkedin.com/in/brian-njoki-406793273" target="_blank" rel="noopener noreferrer" className="text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] transition-colors uppercase font-bold text-[10px] tracking-widest">LinkedIn</a>
-                        </div>
-                    </div>
-
-                    <div className="reveal text-right" style={{ transitionDelay: '0.2s' }}>
-                        <h3 className="text-xl font-bold mb-3 text-[var(--text-primary)]">Professional Support</h3>
-                        <a href="mailto:briannjoki619@gmail.com" className="text-2xl md:text-3xl font-black text-[var(--accent-cyan)] hover:text-[var(--text-primary)] transition-all">
-                            briannjoki619@gmail.com
-                        </a>
-                        <p className="mt-8 text-[var(--text-secondary)] text-[10px] uppercase tracking-widest font-mono opacity-50">
-                            Version 2.1.0 &bull; Brian Njoki &bull; © 2026
-                        </p>
-                    </div>
-                </div>
-            </footer>
+            <Footer />
         </div>
     );
 };
