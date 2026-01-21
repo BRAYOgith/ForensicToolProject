@@ -1,7 +1,13 @@
 import React from 'react';
+import SEO from './components/SEO';
 const DocumentationPage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg-color)] text-[var(--text-primary)] font-sans transition-colors duration-300">
+             <SEO
+                title="Documentation & Usage"
+                description="Technical resources for digital investigators, legal professionals, and developers using ChainForensix for X post preservation."
+                canonical="https://forensic-tool-project.vercel.app/docs"
+            />
             {/* Header / Hero Partial */}
             <header className="bg-[var(--bg-secondary)] py-16 border-b border-[var(--border-color)]">
                 <div className="max-w-4xl mx-auto px-6 text-center">
@@ -85,3 +91,4 @@ const DocumentationPage = () => {
 };
 
 export default DocumentationPage;
+
