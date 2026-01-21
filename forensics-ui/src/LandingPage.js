@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import SEO from './components/SEO';
 
 const LandingPage = () => {
     const [hoveredPointSeeker, setHoveredPointSeeker] = useState(null);
@@ -81,6 +82,7 @@ const LandingPage = () => {
 
     return (
         <div className="bg-[var(--bg-color)] text-[var(--text-primary)] min-h-screen font-sans">
+            <SEO />
             {/* Hero Section (New Consultancy Design) */}
             <header className="relative py-24 lg:py-32 px-6 overflow-hidden bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                 <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center relative z-10">
@@ -425,3 +427,4 @@ const LandingPage = () => {
 };
 
 export default LandingPage;
+
