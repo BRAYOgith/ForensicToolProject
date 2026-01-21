@@ -1,7 +1,13 @@
 import React from 'react';
+import SEO from './components/SEO';
 const MethodologyPage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg-color)] text-[var(--text-primary)] font-sans transition-colors duration-300">
+            <SEO
+                title="Forensic Methodology"
+                description="A deterministic, three-stage process to Capture, Analyze, and Preserve digital evidence. We establish a verifiable chain of custody."
+                canonical="https://forensic-tool-project.vercel.app/methodology"
+            />
             {/* Header / Hero Partial */}
             <header className="bg-[var(--bg-secondary)] py-16 border-b border-[var(--border-color)]">
                 <div className="max-w-4xl mx-auto px-6 text-center">
@@ -114,3 +120,4 @@ const MethodologyPage = () => {
 };
 
 export default MethodologyPage;
+
