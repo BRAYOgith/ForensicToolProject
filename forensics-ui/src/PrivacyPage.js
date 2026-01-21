@@ -1,8 +1,14 @@
 import React from 'react';
+import SEO from './components/SEO';
 
 const PrivacyPage = () => {
     return (
         <div className="bg-[var(--bg-color)] text-[var(--text-primary)] min-h-screen font-sans py-24 px-6">
+            <SEO
+                title="Privacy Policy"
+                description="ChainForensix Privacy Policy. Learn how we collect, use, and protect your data during forensic investigations."
+                canonical="https://forensic-tool-project.vercel.app/privacy"
+            />
             <div className="max-w-4xl mx-auto">
                 <h1 className="text-4xl font-heading font-bold mb-8 border-b border-[var(--border-color)] pb-4">Privacy Policy</h1>
                 <div className="prose prose-lg text-[var(--text-secondary)] leading-relaxed space-y-6">
