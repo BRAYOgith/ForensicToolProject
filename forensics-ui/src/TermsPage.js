@@ -1,8 +1,14 @@
 import React from 'react';
+import SEO from './components/SEO';
 
 const TermsPage = () => {
     return (
         <div className="bg-[var(--bg-color)] text-[var(--text-primary)] min-h-screen font-sans py-24 px-6">
+            <SEO
+                title="Terms of Service"
+                description="ChainForensix Terms of Service. User agreement for accessing our digital forensic tools and blockchain anchoring services."
+                canonical="https://forensic-tool-project.vercel.app/terms"
+            />
             <div className="max-w-4xl mx-auto">
                 <h1 className="text-4xl font-heading font-bold mb-8 border-b border-[var(--border-color)] pb-4">Terms of Service</h1>
                 <div className="prose prose-lg text-[var(--text-secondary)] leading-relaxed space-y-6">
