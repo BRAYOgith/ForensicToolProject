@@ -150,6 +150,12 @@ function MainLayout() {
                   Docs
                 </Link>
                 <Link
+                  to="/use-cases"
+                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
+                >
+                  Use Cases
+                </Link>
+                <Link
                   to="/login"
                   className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors border border-[var(--border-color)] hover:border-[var(--accent-primary)] px-5 py-2 rounded-md hover:bg-[var(--bg-secondary)]"
                 >
