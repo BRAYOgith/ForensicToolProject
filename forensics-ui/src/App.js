@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
+import UseCasesPage from './UseCasesPage';
 import FetchPage from './FetchPage';
 import RetrievePage from './RetrievePage';
 import LoginPage from './LoginPage';
@@ -195,6 +197,7 @@ function MainLayout() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/login" element={<LoginPage setIsAuthenticated={setIsAuthenticated} />} />
           <Route path="/activate" element={<ActivatePage />} />
+          <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             path="/analyze"
@@ -242,9 +245,11 @@ function MainLayout() {
 
 function App() {
   return (
-    <Router>
-      <MainLayout />
-    </Router>
+    <HelmetProvider>
+      <Router>
+        <MainLayout />
+      </Router>
+    </HelmetProvider>
   );
 }
 
