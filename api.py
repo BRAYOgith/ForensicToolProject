@@ -499,21 +499,36 @@ def search_x_posts(current_user):
     query = data.get('query')
     if not query:
         return jsonify({"error": "Search query is required"}), 400
-    search_url = f"https://api.x.com/2/tweets/search/recent?query={requests.utils.quote(query)}&tweet.fields=created_at,author_id&expansions=author_id&user.fields=username&max_results=10"
+
+    # Force query to be quoted as exact phrase to avoid & and other char parsing issues
+    safe_query = f'"{query}"' if not (query.startswith('"') and query.endswith('"')) else query
+
+    search_url = (
+        f"https://api.x.com/2/tweets/search/recent?"
+        f"query={requests.utils.quote(safe_query)}"
+        f"&tweet.fields=created_at,author_id,text,conversation_id,entities"
+        f"&expansions=author_id"
+        f"&user.fields=username"
+        f"&max_results=10"
+    )
+
     response = requests.get(search_url, headers=headers)
     if response.status_code != 200:
+        logger.error(f"X search failed: {response.status_code} - {response.text}")
         return jsonify({"error": "X search failed", "details": response.text}), response.status_code
+
     results = response.json()
     posts = []
     if 'data' in results:
+        users = {u['id']: u['username'] for u in results.get('includes', {}).get('users', [])}
         for tweet in results['data']:
-            author = next((u['username'] for u in results.get('includes', {}).get('users', []) if u['id'] == tweet['author_id']), 'unknown')
             posts.append({
                 "post_id": tweet['id'],
-                "text": tweet['text'],
-                "author_username": author,
+                "text": tweet.get('text', ''),  # Full text when available
+                "author_username": users.get(tweet['author_id'], 'unknown'),
                 "created_at": tweet['created_at']
             })
+
     return jsonify({"posts": posts})
 
 @app.route('/fetch-x-post', methods=['POST'])
@@ -523,25 +538,17 @@ def fetch_x_post(current_user):
     try:
         data = request.get_json()
         post_id = data.get('post_id')
-        input_text = data.get('input_text', '')
+        if not post_id:
+            return jsonify({"error": "Post ID required"}), 400
 
-        if not post_id and not input_text:
-            return jsonify({"error": "Either post_id or input_text is required"}), 400
-
-        if not post_id and input_text:
-            search_resp = requests.post(
-                'http://localhost:5000/search-x-posts',
-                json={'query': input_text},
-                headers={'Authorization': request.headers.get('Authorization')}
-            )
-            if search_resp.status_code != 200:
-                return jsonify({"error": "Text search failed"}), 500
-            search_data = search_resp.json()
-            if not search_data.get('posts'):
-                return jsonify({"error": "No posts found matching the text"}), 404
-            post_id = search_data['posts'][0]['post_id']
-
-        url = f"https://api.x.com/2/tweets/{post_id}?expansions=author_id,attachments.media_keys&user.fields=username&tweet.fields=created_at,entities,attachments&media.fields=media_key,type,url"
+        # Request full context + entities + media
+        url = (
+            f"https://api.x.com/2/tweets/{post_id}?"
+            f"expansions=author_id,attachments.media_keys,in_reply_to_user_id,referenced_tweets.id"
+            f"&tweet.fields=created_at,conversation_id,text,entities,attachments"
+            f"&user.fields=username"
+            f"&media.fields=media_key,type,url,preview_image_url,variants"
+        )
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             return jsonify({"error": f"Failed to fetch post: {response.text}"}), response.status_code
@@ -549,6 +556,12 @@ def fetch_x_post(current_user):
         response_data = response.json()
         tweet_data = response_data.get('data', {})
         tweet_text = tweet_data.get('text', '')
+
+        # Get full thread if this is part of a conversation
+        if 'conversation_id' in tweet_data and tweet_data['conversation_id'] != post_id:
+            # Optional: fetch full thread (advanced, add if needed)
+            pass
+
         entities = tweet_data.get('entities', {})
         urls = entities.get('urls', []) or []
         created_at = tweet_data.get('created_at', '')
@@ -563,41 +576,32 @@ def fetch_x_post(current_user):
         for media_item in media:
             if media_item.get('type') == 'photo' and media_item.get('url'):
                 media_urls.append(media_item['url'])
+            elif media_item.get('type') == 'video' and media_item.get('variants'):
+                # Get highest bitrate video URL
+                variants = media_item['variants']
+                max_bitrate = max(variants, key=lambda v: v.get('bit_rate', 0))
+                media_urls.append(max_bitrate['url'])
 
         defamation_result = predict_defamatory(expanded_text)
         logger.info(f"Defamation scan for post {post_id}: {defamation_result}")
 
         post_data = {
             "id": post_id,
-            "text": expanded_text,
+            "text": expanded_text,  # Full expanded text
             "author_username": author_username,
             "created_at": created_at,
             "author_id": author_id,
             "media_urls": media_urls,
-            "input_text": input_text,
             "defamation": defamation_result
         }
 
-        if input_text:
-            normalized_input = re.sub(r'\s+', ' ', input_text.strip().lower())
-            normalized_fetched = re.sub(r'\s+', ' ', expanded_text.strip().lower())
-            post_data["text_mismatch"] = normalized_input != normalized_fetched
-            verified = 0 if post_data["text_mismatch"] else 1
-            if not post_data["text_mismatch"]:
-                post_data["text"] = input_text
-        else:
-            verified = None
-
+        # Store fetch in DB (your existing code)
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
             'INSERT INTO fetched_evidence (user_id, post_id, content, author_username, created_at, media_urls, timestamp, verified) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (current_user, post_id, expanded_text, author_username, created_at, json.dumps(media_urls), datetime.datetime.now().isoformat(), verified)
-        )
-        c.execute(
-            'INSERT INTO requests_log (user_id, request_type, timestamp) VALUES (?, ?, ?)',
-            (current_user, 'fetch', datetime.datetime.now().isoformat())
+            (current_user, post_id, expanded_text, author_username, created_at, json.dumps(media_urls), datetime.datetime.now().isoformat(), None)
         )
         conn.commit()
         conn.close()
