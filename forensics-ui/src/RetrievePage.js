@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from './api';
 import { useNavigate } from 'react-router-dom';
 
 function RetrievePage() {
@@ -11,7 +11,7 @@ function RetrievePage() {
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
-  const API_BASE = 'https://forensictoolproject.onrender.com';
+
 
   // Protected route check
   useEffect(() => {
@@ -44,11 +44,9 @@ function RetrievePage() {
       setStatus('Looking up Evidence ID from transaction hash...');
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.post(
-          `${API_BASE}/retrieve-evidence`,
-          { transaction_hash: fullHash },
-          { headers: { Authorization: `Bearer ${token}` } }
+        const response = await api.post(
+          '/retrieve-evidence',
+          { transaction_hash: fullHash }
         );
 
         if (response.data.error) {
@@ -86,11 +84,9 @@ function RetrievePage() {
       setStatus('Looking up transaction hash from Evidence ID...');
       setLoading(true);
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.post(
-          `${API_BASE}/get-tx-hash`,
-          { evidence_id: parseInt(evidenceId) },
-          { headers: { Authorization: `Bearer ${token}` } }
+        const response = await api.post(
+          '/get-tx-hash',
+          { evidence_id: parseInt(evidenceId) }
         );
 
         if (response.data.error) {
@@ -127,24 +123,19 @@ function RetrievePage() {
     setRetrievedEvidence(null);
 
     try {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-
       let response;
       if (evidenceId.trim() && !isNaN(evidenceId)) {
         setStatus('Retrieving evidence by ID...');
-        response = await axios.post(
-          `${API_BASE}/get-evidence`,
-          { evidence_id: parseInt(evidenceId) },
-          { headers }
+        response = await api.post(
+          '/get-evidence',
+          { evidence_id: parseInt(evidenceId) }
         );
       } else {
         const fullHash = txHash.trim().toLowerCase().startsWith('0x') ? txHash.trim() : `0x${txHash.trim()}`;
         setStatus('Retrieving evidence by transaction hash...');
-        response = await axios.post(
-          `${API_BASE}/retrieve-evidence`,
-          { transaction_hash: fullHash },
-          { headers }
+        response = await api.post(
+          '/retrieve-evidence',
+          { transaction_hash: fullHash }
         );
       }
 
@@ -163,7 +154,7 @@ function RetrievePage() {
   };
 
   const defamation = retrievedEvidence?.defamation;
-  const isDefamatory = defamation?.is_defamatory;
+  const category = defamation?.category || 'Safe';
   const confidence = defamation?.confidence || 0;
 
   return (
@@ -183,27 +174,31 @@ function RetrievePage() {
 
           <form onSubmit={handleRetrieve} className="space-y-6">
             <div className="group">
-              <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+              <label htmlFor="evidenceId" className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
                 Evidence UID (Numeric)
               </label>
               <input
+                id="evidenceId"
                 type="text"
                 value={evidenceId}
                 onChange={(e) => setEvidenceId(e.target.value)}
                 placeholder="e.g., 1, 2, 3..."
+                aria-label="Evidence ID"
                 className="w-full px-5 py-4 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-2xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all shadow-inner"
               />
             </div>
 
             <div className="relative group">
-              <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+              <label htmlFor="txHash" className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
                 Or Transaction Hash
               </label>
               <input
+                id="txHash"
                 type="text"
                 value={txHash}
                 onChange={(e) => setTxHash(e.target.value)}
                 placeholder="0x..."
+                aria-label="Transaction Hash"
                 className="w-full px-5 py-4 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-2xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all shadow-inner"
               />
             </div>
@@ -214,7 +209,7 @@ function RetrievePage() {
               className="w-full bg-cyan-500 hover:bg-cyan-600 text-[#0A192F] font-bold py-4 rounded-2xl transition-all shadow-lg shadow-cyan-500/20 transform hover:scale-[1.01] disabled:opacity-50"
             >
               {loading ? (
-                <span className="flex items-center justify-center gap-2">
+                <span className="flex items-center justify-center gap-2" role="status">
                   <div className="w-4 h-4 border-2 border-[#0A192F] border-t-transparent rounded-full animate-spin"></div>
                   LOCATING BLOCKS...
                 </span>
@@ -223,9 +218,13 @@ function RetrievePage() {
           </form>
 
           {status && (
-            <div className="mt-8 p-4 bg-[#0A192F]/50 border border-gray-800 rounded-xl text-center">
+            <div
+              role="alert"
+              aria-live="polite"
+              className={`mt-8 p-4 bg-[var(--bg-color)]/50 border rounded-xl text-center ${status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? 'border-red-500/50' : 'border-gray-800'}`}
+            >
               <p className="text-gray-400 text-sm font-mono uppercase">
-                Status: <span className="text-cyan-400 font-bold ml-2">{status}</span>
+                Status: <span className={`${status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? 'text-red-400' : 'text-cyan-400'} font-bold ml-2`}>{status}</span>
               </p>
             </div>
           )}
@@ -234,42 +233,143 @@ function RetrievePage() {
             <div className="mt-12 animate-slide-up">
               <div className="border-t border-gray-800 pt-10">
                 {defamation && (
-                  <div
-                    className={`mb-10 p-8 rounded-3xl text-white font-bold text-center relative overflow-hidden shadow-2xl border-2 ${isDefamatory
-                      ? 'bg-red-500/10 border-red-500/50 text-red-400'
-                      : 'bg-green-500/10 border-green-500/50 text-green-400'
-                      }`}
-                  >
-                    <div className="relative z-10">
-                      <h4 className="text-sm uppercase tracking-[0.2em] mb-2 opacity-80">Blockchain Verified Audit</h4>
-                      <p className="text-3xl font-black mb-2 uppercase">
-                        {isDefamatory ? 'CRITICAL: RED-FLAG DETECTED' : 'SYSTEM: CLEAR / NEUTRAL'}
-                      </p>
-                      <p className="font-mono text-xs">MODEL CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
+                  <div className="mb-10 space-y-4">
+                    <div
+                      className={`p-8 rounded-3xl text-white font-bold text-center relative overflow-hidden shadow-2xl border-2 ${category === 'Hate Speech'
+                        ? 'bg-red-600/20 border-red-500 text-red-400'
+                        : category === 'Defamatory'
+                          ? 'bg-orange-500/10 border-orange-500/50 text-orange-400'
+                          : 'bg-green-500/10 border-green-500/50 text-green-400'
+                        }`}
+                    >
+                      <div className="relative z-10">
+                        <h4 className="text-sm uppercase tracking-[0.2em] mb-2 opacity-80">Blockchain Verified Forensic Audit</h4>
+                        <p className="text-3xl font-black mb-2 uppercase">
+                          {category === 'Hate Speech' ? 'CRITICAL: HATE SPEECH' :
+                            category === 'Defamatory' ? 'WARNING: DEFAMATORY' :
+                              'SYSTEM: CLEAR / NEUTRAL'}
+                        </p>
+                        <p className="font-mono text-xs mb-4">MODEL CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
+
+                        <div className="bg-black/20 backdrop-blur-sm p-4 rounded-xl text-left border border-white/10">
+                          <p className="text-sm leading-relaxed mb-0 font-medium italic opacity-90">
+                            "{defamation.justification}"
+                          </p>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Detailed Score Breakdown */}
+                    {defamation.all_scores && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {Object.entries(defamation.all_scores).map(([key, score]) => (
+                          <div key={key} className="bg-[var(--bg-color)] p-4 rounded-2xl border border-gray-800 shadow-inner group">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{key.replace('_', ' ')}</span>
+                              <span className={`text-xs font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-600'}`}>{(score * 100).toFixed(1)}%</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-gray-900 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-1000 ${key === 'hate_speech' ? 'bg-red-500' : key === 'defamatory' ? 'bg-orange-500' : 'bg-green-500'}`}
+                                style={{ width: `${score * 100}%` }}
+                              ></div>
+                            </div>
+                            {defamation.all_justifications && (
+                              <p className="text-[9px] text-gray-600 mt-2 leading-tight opacity-0 group-hover:opacity-100 transition-opacity">
+                                {defamation.all_justifications[key]}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {defamation.technical_justification && (
+                      <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
+                        <p className="text-[10px] text-cyan-400/80 font-mono italic">
+                          <span className="font-bold uppercase mr-2">Technical Engine Note:</span>
+                          {defamation.technical_justification}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 <div className="grid md:grid-cols-2 gap-6 mb-8">
-                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                  <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
                     <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Subject Handle</label>
                     <p className="text-white font-bold text-lg">@{retrievedEvidence.author_username || 'N/A'}</p>
                   </div>
-                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                  <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
                     <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Evidence UID</label>
                     <p className="text-white font-bold text-lg">#{retrievedEvidence.evidence_id || 'N/A'}</p>
                   </div>
-                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                  <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
                     <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Assigned Investigator</label>
                     <p className="text-white font-bold text-lg">{retrievedEvidence.investigator || 'N/A'}</p>
                   </div>
-                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner">
+                  <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
                     <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Timestamp logged</label>
                     <p className="text-white font-bold text-lg">{retrievedEvidence.created_at || retrievedEvidence.timestamp || 'N/A'}</p>
                   </div>
                 </div>
 
-                <div className="bg-[#0A192F] p-8 rounded-3xl border border-gray-800 shadow-inner mb-8">
+                {retrievedEvidence.engagement && (
+                  <div className="mb-8">
+                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-4 block">On-Chain Engagement Snapshot</label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {[
+                        { label: 'Retweets', value: retrievedEvidence.engagement.retweets },
+                        { label: 'Replies', value: retrievedEvidence.engagement.replies },
+                        { label: 'Likes', value: retrievedEvidence.engagement.likes },
+                        { label: 'Views', value: retrievedEvidence.engagement.views }
+                      ].map((stat, i) => (
+                        <div key={i} className="bg-[var(--bg-color)] p-4 rounded-xl border border-gray-800 text-center shadow-inner">
+                          <p className="text-[9px] text-gray-500 uppercase mb-1">{stat.label}</p>
+                          <p className="text-white font-black text-lg">{stat.value?.toLocaleString() || '0'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {retrievedEvidence.verification && (
+                  <div className={`p-6 mb-8 rounded-3xl border-2 transition-all duration-500 ${retrievedEvidence.verification.status === 'verified'
+                    ? 'bg-green-500/10 border-green-500/50 text-green-400 shadow-[0_0_20px_rgba(34,197,94,0.1)]'
+                    : retrievedEvidence.verification.status === 'tampered'
+                      ? 'bg-red-500/10 border-red-500/50 text-red-400 shadow-[0_0_20px_rgba(239,68,68,0.1)]'
+                      : 'bg-slate-800/50 border-gray-700 text-gray-400'
+                    }`}>
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className={`w-4 h-4 rounded-full ${retrievedEvidence.verification.status === 'verified' ? 'bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.5)]' :
+                        retrievedEvidence.verification.status === 'tampered' ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-gray-500'
+                        }`}></div>
+                      <h4 className="text-base font-black uppercase tracking-[0.1em]">
+                        {retrievedEvidence.verification.status === 'verified' ? 'Cryptographic Integrity Secured' :
+                          retrievedEvidence.verification.status === 'tampered' ? 'TAMPER ALERT: HASH DISCREPANCY' :
+                            'Integrity Check: Post Metadata Missing'}
+                      </h4>
+                    </div>
+
+                    <div className="space-y-2 font-mono text-[9px] opacity-80 uppercase tracking-tighter">
+                      <div className="flex justify-between border-b border-white/5 pb-1">
+                        <span>On-Chain Fingerprint (Master):</span>
+                        <span className="truncate ml-4">{retrievedEvidence.verification.on_chain_hash || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-white/5 pb-1">
+                        <span>Calculated Hash (Recalculated):</span>
+                        <span className={`truncate ml-4 ${retrievedEvidence.verification.status === 'tampered' ? 'text-red-400 font-bold' : ''}`}>
+                          {retrievedEvidence.verification.calculated_hash || 'UNKNOWN'}
+                        </span>
+                      </div>
+                      <p className="text-[8px] leading-tight mt-3 text-gray-500 normal-case italic">
+                        The SHA-256 algorithm was re-executed locally on the retrieved content and metadata to ensure no alteration occurred since the primary anchor was created on Sepolia.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-[var(--bg-color)] p-8 rounded-3xl border border-gray-800 shadow-inner mb-8">
                   <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-3 block">Immutable Content Record</label>
                   <p className="text-gray-300 leading-relaxed italic text-lg">
                     "{retrievedEvidence.text || retrievedEvidence.content || 'No text content recorded.'}"
@@ -277,7 +377,7 @@ function RetrievePage() {
                 </div>
 
                 {ethTxHash && (
-                  <div className="bg-[#0A192F] p-5 rounded-2xl border border-gray-800 shadow-inner mb-10">
+                  <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner mb-10">
                     <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2 block">Ethereum Blockchain Receipt (Sepolia)</label>
                     <a
                       href={`https://sepolia.etherscan.io/tx/${ethTxHash}`}

@@ -1,39 +1,86 @@
-from flask import Flask, request, jsonify, make_response
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-import requests
-import json
-from store_blockchain import store_evidence, get_evidence, get_evidence_by_tx_hash
-from dotenv import load_dotenv
-import os
 import logging
+import os
+import json
 import re
 import sqlite3
 import jwt
 import datetime
+import requests
+from flask import Flask, request, jsonify, make_response
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from dotenv import load_dotenv
+
+# Initialize Logging first
+logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+
+from store_blockchain import (
+    store_evidence, get_evidence, get_evidence_by_tx_hash, generate_evidence_hash
+)
+
+try:
+    logger.info("Attempting to import easyocr...")
+    import easyocr
+    # Initialize reader once at startup with English and Swahili support
+    # Note: This may take several minutes on first run to download models
+    logger.info("Initializing EasyOCR reader (en, sw) on CPU...")
+    ocr_reader = easyocr.Reader(['en', 'sw'], gpu=False) 
+    logger.info("EasyOCR initialized successfully")
+except ImportError:
+    logger.warning("EasyOCR not found. OCR functionality will be disabled. Run pip install easyocr.")
+    ocr_reader = None
+except Exception as e:
+    logger.error(f"EasyOCR initialization failed: {e}", exc_info=True)
+    ocr_reader = None
+
+logger.info("Proceeding with remaining imports...")
+
 import pdfkit
 from functools import wraps
 from datetime import timedelta
 from bcrypt import gensalt, hashpw, checkpw
-
-
-logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
+import emoji
+import hashlib
+from crypto_utils import encrypt_field, decrypt_field
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({
-        "status": "online",
-        "message": "Forensic Tool Backend is Running Successfully!",
-        "service": "ForensicToolProject"
-    }), 200
+allowed_origins = ["https://forensic-tool-project.vercel.app"]
+# In development, allow both localhost and 127.0.0.1
+if os.getenv("FLASK_ENV") == "development" or not os.getenv("FLASK_ENV"):
+    allowed_origins.extend(["http://localhost:3000", "http://127.0.0.1:3000"])
+CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
-CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://forensic-tool-project.vercel.app"]}})
+@app.after_request
+def set_security_headers(response):
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https: blob:; "
+        "connect-src 'self' https://chainforensix-api.onrender.com https://sepolia.etherscan.io"
+    )
+    
+    # Allow local API connections in dev mode
+    if os.getenv("FLASK_ENV") == "development" or not os.getenv("FLASK_ENV"):
+        csp += " http://localhost:5000 http://127.0.0.1:5000"
+        
+    csp += "; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    response.headers['Content-Security-Policy'] = csp
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    return response
 
-load_dotenv()
+
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
 
 limiter = Limiter(
@@ -42,60 +89,230 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-API_URL = "https://api-inference.huggingface.co/models/Brayo44/chainforensix_defamation_model"
-HF_API_KEY = os.getenv("HF_API_KEY")
-def predict_defamatory(text):
+MODEL_PATH = "models/afro_xlmr_forensics"
+
+tokenizer = None
+model = None
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+try:
+    logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+    model.to(device)
+    model.eval()
+    logger.info(f"Forensic model loaded on {device}")
+except Exception as e:
+    logger.warning(f"Forensic model not loaded: {e}")
+    logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
+
+# Forensic Lexicons for Personalization
+NCIC_LEXICON = [
+    "Hatupangwingwi", "Mende", "Chunga Kura", "Kama noma noma", 
+    "Kwekwe", "Madoa doa", "Operation Linda Kura", "Watu wa kurusha mawe", 
+    "Watajua hawajui", "Wabara waende kwao", "Wakuja", "Fumigation"
+]
+
+DEFAMATORY_MARKERS = [
+    "thief", "corrupt", "cartel", "mafia", "scammer", "conman", "mwizi", 
+    "fake", "fraud", "liar", "muongo", "character assassination", "poison",
+    "jinxed", "betrayed", "failed", "stole", "corrupt"
+]
+
+SECURITY_THREATS = [
+    "kill", "planning", "bomb", "attack", "al-shabaab", "terror", "violence",
+    "mapinduzi", "revolution", "overthrow", "dead"
+]
+
+SAFE_SIGNIFIERS = [
+    "think", "opinion", "debate", "agree", "disagree", "policy", "news",
+    "discussion", "report", "fact", "together", "peace"
+]
+
+def extract_forensic_markers(text):
     text_lower = text.lower()
+    found_ncic = [word for word in NCIC_LEXICON if word.lower() in text_lower]
+    found_defam = [word for word in DEFAMATORY_MARKERS if word.lower() in text_lower]
+    found_security = [word for word in SECURITY_THREATS if word.lower() in text_lower]
+    found_safe = [word for word in SAFE_SIGNIFIERS if word.lower() in text_lower]
     
-    safe_keywords = ['congrat', 'congrats', 'well done', 'good', 'positive', 'welcome', 'happy', 'celebrate', 'victory', 'win', 'president', 'FA', 'years', '👌']
-    if any(word in text_lower for word in safe_keywords):
-        logger.info("Safe keywords detected – lowering confidence")
-        return {"is_defamatory": False, "confidence": 0.0}
- 
-    risk_keywords = [
-        'madoadoa', 'inyenzi', 'cockroaches', 'fumigate', 'fumigation', 'kwekwe', 
-        'conman', 'thief', 'looter', 'cartel', 'kill', 'eliminate', 'bloodsucker',
-        'snake', 'devil', 'witches', 'sorcerer', 'rapist', 'murderer', 'sipangwingwi', 'tusitishwe'
-    ]
+    # Capture handles
+    found_entities = re.findall(r'@\w+', text)
     
-    found_risk_words = [word for word in risk_keywords if word in text_lower]
-    if found_risk_words:
-        logger.info(f"High-risk/NCIC keywords detected: {found_risk_words}")
+    # Capture potential Proper Names (Sequences of Title Case words)
+    # Improved regex to handle acronyms and single initials
+    names = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
+    unique_names = list(set(names))
+    
+    # Capture Hashtags
+    hashtags = re.findall(r'#\w+', text)
+    
+    # Clean up markers by removing empty results
+    return {
+        "ncic": list(set(found_ncic)),
+        "defamatory": list(set(found_defam)),
+        "security": list(set(found_security)),
+        "safe": list(set(found_safe)),
+        "entities": list(set(found_entities)),
+        "names": unique_names,
+        "hashtags": hashtags
+    }
+
+def clean_for_ai(text):
+    # Convert real emojis to text (Matches training pipeline)
+    text = emoji.demojize(text)
+    # Standardize handles
+    text = re.sub(r'@\w+', '@user', text)
+    # Remove URLs
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    return text.strip()
+
+def process_visual_content(media_urls):
+    if not media_urls:
+        return {"text": "", "found": False, "status": "no_media"}
         
-        return {"is_defamatory": True, "confidence": 1.0}
+    if ocr_reader is None:
+        logger.warning("OCR process requested but reader is not initialized")
+        return {"text": "", "found": False, "status": "service_unavailable"}
     
-    if not HF_API_KEY:
-        logger.warning("HF_API_KEY not set - skipping AI check")
-        return {"is_defamatory": False, "confidence": 0.0}
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": text}
+    extracted_text = []
+    found_any_text = False
+    
+    for url in media_urls:
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                results = ocr_reader.readtext(resp.content)
+                text = " ".join([res[1] for res in results])
+                if text.strip():
+                    extracted_text.append(text.strip())
+                    found_any_text = True
+        except Exception as e:
+            logger.error(f"OCR failed for {url}: {e}")
+            
+    return {
+        "text": " | ".join(extracted_text) if extracted_text else "",
+        "found": found_any_text,
+        "status": "extracted" if found_any_text else "no_text_detected"
+    }
+
+
+def predict_defamatory(text):
+    if not tokenizer or not model:
+        return {"is_defamatory": False, "category": "None", "confidence": 0.0}
+
+    # Clean text to match model training format
+    cleaned_text = clean_for_ai(text)
+
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=5)
+        inputs = tokenizer(cleaned_text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
+            
+            # Map classes: 0=Safe, 1=Defamatory, 2=Hate Speech
+            confidences = prob[0].tolist()
+        categories = ["Safe", "Defamatory", "Hate Speech"]
         
-        if response.status_code != 200:
-            logger.error(f"HF API Error {response.status_code}: {response.text}")
-            return {"is_defamatory": False, "confidence": 0.0}
-        output = response.json()
+        # --- OPTIMIZED FORENSIC THRESHOLDS ---
+        # Based on local balanced tuning for high-sensitivity forensic triage
+        HATE_THRESHOLD = 0.45
+        DEFAM_THRESHOLD = 0.25
         
-        if isinstance(output, list) and len(output) > 0 and isinstance(output[0], list):
-            scores = output[0]
-        elif isinstance(output, list):
-            scores = output
+        # Priority 1: Hate Speech
+        if confidences[2] > HATE_THRESHOLD:
+            top_class = 2
+        # Priority 2: Defamatory (if not Hate Speech)
+        elif confidences[1] > DEFAM_THRESHOLD:
+            top_class = 1
+        # Default: Safe
         else:
-             return {"is_defamatory": False, "confidence": 0.0}
+            top_class = 0
+            
+        result_category = categories[top_class]
+        flag = top_class > 0 # Flag if not Safe
         
-        defamatory_score = 0.0
-        for item in scores:
-            if item.get('label') in ['LABEL_1', 'DEFAMATORY']:
-                defamatory_score = item['score']
-                break
+        # Forensic Extraction
+        markers = extract_forensic_markers(text)
         
-        confidence = float(defamatory_score)
-        is_defamatory = confidence >= 0.90
-        return {"is_defamatory": is_defamatory, "confidence": round(confidence, 4)}
+        def generate_granular_justification(cat, score):
+            cat_lower = cat.lower().replace(" ", "_")
+            
+            # --- Personalization Logic ---
+            subjects = f" targeting {', '.join(markers['entities'] + markers['names'])}" if (markers['entities'] or markers['names']) else ""
+            
+            if cat_lower == "hate_speech":
+                if score > 0.40:
+                    specifics = f" Critical markers found: {', '.join(markers['ncic'] + markers['security'])}." if (markers['ncic'] or markers['security']) else ""
+                    return f"This score indicates a high probability of ethnic incitement or prohibited speech patterns.{specifics}{subjects}"
+                elif score > 0.05:
+                    return f"Low-level markers of inflammatory language detected, but insufficient to reach the legal threshold for hate speech."
+                else:
+                    return f"Negligible probability. No monitored ethnic slurs or incitement patterns detected."
+            
+            elif cat_lower == "defamatory":
+                if score > 0.35:
+                    specifics = f" Markers identified: {', '.join(markers['defamatory'])}." if markers['defamatory'] else ""
+                    return f"High probability of character assassination or reputational harm.{specifics}{subjects}"
+                elif score > 0.10:
+                    return f"Suggestive of negative sentiment{subjects}, but lacks the definitive markers for a high-confidence defamatory flag."
+                else:
+                    return f"Normal commentary pattern. No patterns of targeted reputational harm detected."
+            
+            else: # Safe
+                if score > 0.50:
+                    signifiers = f" Semantic signifiers: {', '.join(markers['safe'])}." if markers['safe'] else ""
+                    return f"Content reflects standard social discourse or objective reporting.{signifiers}"
+                else:
+                    return f"Analysis suggests standard content, though some semantic ambiguities were processed."
+
+        # Compute justifications for ALL categories
+        all_justifications = {
+            "safe": generate_granular_justification("Safe", confidences[0]),
+            "defamatory": generate_granular_justification("Defamatory", confidences[1]),
+            "hate_speech": generate_granular_justification("Hate Speech", confidences[2])
+        }
+
+        top_justification = all_justifications[result_category.lower().replace(" ", "_")]
+        return {
+            "is_defamatory": flag,
+            "category": result_category,
+            "confidence": confidences[top_class],
+            "justification": top_justification,
+            "all_scores": {
+                "safe": confidences[0],
+                "defamatory": confidences[1],
+                "hate_speech": confidences[2]
+            },
+            "all_justifications": all_justifications,
+            "technical_justification": f"Processed via Afro-XLMR (N={len(text)} chars). Markers: {sum(len(v) for v in markers.values())}."
+        }
+    except Exception as e:
+        logger.error(f"Inference Failure: {e}")
+        return {"is_defamatory": False, "category": "Safe", "confidence": 0.0, "justification": "Error during analysis fallback applied.", "all_scores": {"safe": 1.0, "defamatory": 0.0, "hate_speech": 0.0}}
+        
+        # Technical Justification for the Forensic Log
+        tech_note = f"Afro-XLMR semantic vectors analyzed. "
+        if markers['security']: tech_note += f"Security/Threat lexicon match: {', '.join(markers['security'])}. "
+        if markers['hashtags']: tech_note += f"Monitored hashtags: {', '.join(markers['hashtags'])}. "
+        if ":" in cleaned_text: tech_note += "Visual toxicity (emojis) transcribed. "
+
+        return {
+            "is_defamatory": flag, 
+            "category": result_category,
+            "confidence": round(confidences[top_class], 4),
+            "justification": top_justification,
+            "technical_justification": tech_note,
+            "all_scores": {
+                "safe": round(confidences[0], 4),
+                "defamatory": round(confidences[1], 4),
+                "hate_speech": round(confidences[2], 4)
+            },
+            "all_justifications": all_justifications
+        }
     except Exception as e:
         logger.error(f"Prediction error: {e}")
-        return {"is_defamatory": False, "confidence": 0.0}
+        return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "System error during analysis."}
 
 bearer_token = os.getenv("X_BEARER_TOKEN")
 if not bearer_token:
@@ -107,57 +324,40 @@ headers = {"Authorization": f"Bearer {bearer_token}"}
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 def send_forensic_email(email, token, email_type="activation"):
-    """
-    Sends either an Activation or Password Reset email using Brevo.
-    email_type: "activation" or "reset"
-    """
     if not BREVO_API_KEY:
-        logger.warning(f"BREVO_API_KEY not set — printing {email_type} link to console")
-        route = "activate" if email_type == "activation" else "reset-password"
-        link = f"https://forensic-tool-project.vercel.app/{route}?token={token}"
-        print(f"\n=== {email_type.upper()} LINK ===\n{link}\n")
+        logger.warning(f"BREVO_API_KEY not set — printing {email_type} link to console for local testing")
+        link = f"http://localhost:3000/{'activate' if email_type == 'activation' else 'reset-password'}?token={token}"
+        print(f"\n=== {email_type.upper()} LINK FOR {email} ===\n{link}\n========================================\n")
         return
 
-    # Determine wording and route based on purpose
-    if email_type == "activation":
-        route = "activate"
-        subject = "Activate Your Forensic Tool Account"
-        title = "Welcome to ChainForensix!"
-        button_text = "Activate My Account"
-        instruction = "Please click the button below to activate your account."
-    else:
-        route = "reset-password"
-        subject = "Reset Your Forensic Tool Password"
-        title = "Password Reset Request"
-        button_text = "Reset My Password"
-        instruction = "We received a request to reset your password. Click the button below to continue."
-
-    activation_link = f"https://forensic-tool-project.vercel.app/{route}?token={token}"
+    link = f"http://localhost:3000/{'activate' if email_type == 'activation' else 'reset-password'}?token={token}"
+    
+    subject = "Activate Your ChainForensix Account" if email_type == "activation" else "Reset Your ChainForensix Password"
+    title = "Account Activation" if email_type == "activation" else "Password Reset"
+    button_text = "Activate My Account" if email_type == "activation" else "Reset My Password"
+    footer_text = "If you didn't request this, please ignore this email."
 
     url = "https://api.brevo.com/v3/smtp/email"
     payload = {
-        "sender": {
-            "name": "ChainForensix Support",
-            "email": "briannjoki619@gmail.com"
-        },
+        "sender": {"name": "ChainForensix Support", "email": "briannjoki619@gmail.com"},
         "to": [{"email": email}],
         "subject": subject,
         "htmlContent": f"""
         <html>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;">
-            <div style="background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center;">
-                <h1 style="color: #1a73e8; font-size: 28px;">ChainForensix</h1>
-                <h2 style="color: #333; margin: 30px 0;">{title}</h2>
-                <p style="font-size: 18px; color: #555; line-height: 1.6;">
-                    {instruction}
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8fafc;">
+            <div style="background: white; padding: 40px; border-radius: 16px; border: 1px solid #e2e8f0; text-align: center;">
+                <h1 style="color: #06b6d4; font-size: 24px; font-weight: 800; tracking-tighter: -0.05em;">ChainForensix</h1>
+                <h2 style="color: #0f172a; margin: 30px 0;">{title}</h2>
+                <p style="font-size: 16px; color: #475569; line-height: 1.6;">
+                    Please click the button below to proceed with your {email_type}.
                 </p>
-                <a href="{activation_link}" 
-                   style="display: inline-block; margin: 30px 0; padding: 16px 32px; background: #1a73e8; color: white; text-decoration: none; font-weight: bold; font-size: 18px; border-radius: 8px;">
+                <a href="{link}" 
+                   style="display: inline-block; margin: 30px 0; padding: 16px 32px; background: #06b6d4; color: white; text-decoration: none; font-weight: bold; font-size: 16px; border-radius: 8px;">
                     {button_text}
                 </a>
-                <p style="color: #777; font-size: 14px; margin-top: 40px;">
+                <p style="color: #94a3b8; font-size: 12px; margin-top: 40px;">
                     This link expires in 1 hour.<br>
-                    If you didn't request this, please ignore this email.
+                    {footer_text}
                 </p>
             </div>
         </body>
@@ -165,12 +365,7 @@ def send_forensic_email(email, token, email_type="activation"):
         """
     }
 
-    headers = {
-        "accept": "application/json",
-        "api-key": BREVO_API_KEY,
-        "content-type": "application/json"
-    }
-
+    headers = {"accept": "application/json", "api-key": BREVO_API_KEY, "content-type": "application/json"}
     try:
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code in [200, 201]:
@@ -199,8 +394,17 @@ def init_db():
         created_at TEXT,
         media_urls TEXT,
         timestamp TEXT,
-        verified INTEGER,
-        FOREIGN KEY (user_id) REFERENCES users(id)
+        verified INTEGER
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        action TEXT,
+        details TEXT,
+        ip_address TEXT,
+        timestamp TEXT,
+        prev_hash TEXT,
+        entry_hash TEXT
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS stored_evidence (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,6 +422,27 @@ def init_db():
         timestamp TEXT,
         FOREIGN KEY (user_id) REFERENCES users(id)
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS chatbot_conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        message TEXT NOT NULL,
+        page_context TEXT,
+        escalated INTEGER DEFAULT 0,
+        timestamp TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS expert_appointments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        phone TEXT,
+        topic TEXT,
+        preferred_date TEXT,
+        preferred_time TEXT,
+        message TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT
+    )''')
     c.execute('PRAGMA table_info(users)')
     columns = [row[1] for row in c.fetchall()]
     if 'is_active' not in columns:
@@ -228,23 +453,85 @@ def init_db():
     columns = [row[1] for row in c.fetchall()]
     if 'verified' not in columns:
         c.execute('ALTER TABLE fetched_evidence ADD COLUMN verified INTEGER')
+    if 'is_defamatory' not in columns:
+        c.execute('ALTER TABLE fetched_evidence ADD COLUMN is_defamatory INTEGER DEFAULT 0')
     c.execute('PRAGMA table_info(stored_evidence)')
     columns = [row[1] for row in c.fetchall()]
     if 'eth_tx_hash' not in columns:
         c.execute('ALTER TABLE stored_evidence ADD COLUMN eth_tx_hash TEXT')
+    if 'post_id' not in columns:
+        c.execute('ALTER TABLE stored_evidence ADD COLUMN post_id TEXT')
+    if 'engagement' not in (row[1] for row in c.execute('PRAGMA table_info(fetched_evidence)').fetchall()):
+        c.execute('ALTER TABLE fetched_evidence ADD COLUMN engagement TEXT')
+    
+    # Backfill is_defamatory for old records
+    c.execute('UPDATE fetched_evidence SET is_defamatory = 0 WHERE is_defamatory IS NULL')
+    
+    # Check if audit_logs exists (created above, but just in case of partial runs)
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_logs'")
+    if not c.fetchone():
+        c.execute('''CREATE TABLE audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT,
+            details TEXT,
+            ip_address TEXT,
+            timestamp TEXT,
+            prev_hash TEXT,
+            entry_hash TEXT
+        )''')
+    
     conn.commit()
     conn.close()
+
+def log_audit(user_id, action, details):
+    """
+    Log a user action with tamper-evident hash chaining.
+    """
+    try:
+        timestamp = datetime.datetime.now().isoformat()
+        ip_address = request.remote_addr if request else "unknown"
+        
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        
+        # Get the hash of the last entry to chain
+        c.execute('SELECT entry_hash FROM audit_logs ORDER BY id DESC LIMIT 1')
+        row = c.fetchone()
+        prev_hash = row[0] if row else "GENESIS_BLOCK"
+        
+        # Create hash of this entry
+        entry_data = f"{prev_hash}{user_id}{action}{details}{timestamp}{ip_address}"
+        entry_hash = hashlib.sha256(entry_data.encode('utf-8')).hexdigest()
+        
+        c.execute(
+            'INSERT INTO audit_logs (user_id, action, details, ip_address, timestamp, prev_hash, entry_hash) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (user_id, action, details, ip_address, timestamp, prev_hash, entry_hash)
+        )
+        conn.commit()
+        conn.close()
+        logger.info(f"Audit Log: User {user_id} - {action} - {details}")
+    except Exception as e:
+        logger.error(f"Audit Logging Failed: {e}")
 
 init_db()
 
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token or not token.startswith('Bearer '):
+        token = None
+
+        # Priority 1: httpOnly cookie (most secure)
+        if 'token' in request.cookies:
+            token = request.cookies.get('token')
+        # Priority 2: Authorization header (backward compatibility)
+        elif request.headers.get('Authorization', '').startswith('Bearer '):
+            token = request.headers.get('Authorization').split(' ')[1]
+
+        if not token:
             return jsonify({'error': 'Token is missing or invalid'}), 401
         try:
-            token = token.split(' ')[1]
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
             current_user = data['user_id']
             conn = sqlite3.connect('forensic.db')
@@ -260,6 +547,7 @@ def token_required(f):
             return jsonify({'error': 'Invalid token'}), 401
         return f(current_user, *args, **kwargs)
     return decorated
+
 
 def expand_urls(text, urls):
     if not urls:
@@ -287,6 +575,7 @@ def validate_auth_input(username=None, password=None, email=None):
     return None
 
 @app.route('/register', methods=['POST'])
+@limiter.limit("3 per minute")
 def register():
     data = request.get_json()
     username = data.get('username', '').strip()
@@ -301,7 +590,8 @@ def register():
         return jsonify({'error': validation_error}), 400
 
     hashed = hashpw(password.encode('utf-8'), gensalt())
-    conn = sqlite3.connect('forensic.db'); c = conn.cursor()
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
     try:
         c.execute('INSERT INTO users (username, password, email, is_active) VALUES (?, ?, ?, 0)', (username, hashed, email))
         user_id = c.lastrowid
@@ -310,13 +600,15 @@ def register():
             'user_id': user_id,
             'exp': datetime.datetime.utcnow() + timedelta(hours=1)
         }, app.config['SECRET_KEY'])
-        
         send_forensic_email(email, activation_token, email_type="activation")
-        return jsonify({'message': 'Registration successful. Check email to activate.'}), 201
-    except sqlite3.IntegrityError:
-        return jsonify({'error': 'Username already exists'}), 400
-    finally:
         conn.close()
+        return jsonify({'message': 'Registration successful. Please check your email to activate your account.'}), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Registration could not be completed. Please try a different username or email.'}), 400
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/activate', methods=['GET'])
 def activate():
@@ -343,7 +635,7 @@ def activate():
             <div style="text-align:center; padding:50px; font-family:Arial;">
                 <h1 style="color:green;">Account Already Activated!</h1>
                 <p>You can now log in.</p>
-                <a href="https://forensic-tool-project.vercel.app/login" style="color:#1a73e8;">Go to Login →</a>
+                <a href="http://localhost:3000/login" style="color:#1a73e8;">Go to Login →</a>
             </div>
             """, 200
 
@@ -356,7 +648,7 @@ def activate():
         <div style="text-align:center; padding:50px; font-family:Arial;">
             <h1 style="color:green;">Account Activated Successfully!</h1>
             <p>You can now log in to Forensic Tool.</p>
-            <a href="https://forensic-tool-project.vercel.app/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
+            <a href="http://localhost:3000/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
         </div>
         """, 200
 
@@ -388,10 +680,11 @@ def resend_activation():
         'exp': datetime.datetime.utcnow() + timedelta(hours=1)
     }, app.config['SECRET_KEY'])
 
-    send_activation_email(email, token)
+    send_forensic_email(email, token, email_type="activation")
     return jsonify({'message': 'New activation link sent! Check your inbox and spam folder.'}), 200
 
 @app.route('/forgot-password', methods=['POST'])
+@limiter.limit("3 per minute")
 def forgot_password():
     data = request.get_json()
     email = data.get('email')
@@ -405,6 +698,7 @@ def forgot_password():
     conn.close()
 
     if not user:
+        # Don't confirm if user exists or not for security, but we'll return success to prevent Phishing
         return jsonify({'message': 'If an account exists with this email, a reset link has been sent.'}), 200
 
     reset_token = jwt.encode({
@@ -417,6 +711,7 @@ def forgot_password():
     return jsonify({'message': 'A password reset link has been sent to your email.'}), 200
 
 @app.route('/reset-password', methods=['POST'])
+@limiter.limit("5 per minute")
 def reset_password():
     data = request.get_json()
     token = data.get('token')
@@ -459,12 +754,17 @@ def reset_password():
         return jsonify({'error': 'Reset link expired'}), 400
     except Exception as e:
         return jsonify({'error': 'Invalid reset link'}), 400
-        
+
 @app.route('/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def login():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
+    username = data.get('username', '')
+    password = data.get('password', '')
+
+    # Input type validation — prevents operator-based injection payloads
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify({'error': 'Invalid input format'}), 400
 
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
@@ -476,12 +776,15 @@ def login():
     conn.close()
 
     if not user:
+        log_audit(0, "login_failed", f"User not found: {username}")
         return jsonify({'error': 'Invalid username or password'}), 401
 
     if not checkpw(password.encode('utf-8'), user[1]):
+        log_audit(user[0], "login_failed", "Incorrect password")
         return jsonify({'error': 'Invalid username or password'}), 401
 
     if user[2] == 0:
+        log_audit(user[0], "login_failed", "Account not activated")
         return jsonify({'error': 'Account not activated. Please check your email for activation link.'}), 403
 
     token = jwt.encode({
@@ -489,7 +792,20 @@ def login():
         'exp': datetime.datetime.utcnow() + timedelta(hours=24)
     }, app.config['SECRET_KEY'])
 
-    return jsonify({'token': token, 'user_id': user[0]}), 200
+    log_audit(user[0], "login_success", "User logged in")
+
+    response = make_response(jsonify({'token': token, 'user_id': user[0]}), 200)
+    is_production = os.getenv('FLASK_ENV') != 'development'
+    response.set_cookie(
+        'token',
+        token,
+        httponly=True,
+        secure=is_production,
+        samesite='Lax',
+        max_age=86400,
+        path='/'
+    )
+    return response
 
 @app.route('/search-x-posts', methods=['POST'])
 @token_required
@@ -506,7 +822,7 @@ def search_x_posts(current_user):
     search_url = (
         f"https://api.x.com/2/tweets/search/recent?"
         f"query={requests.utils.quote(safe_query)}"
-        f"&tweet.fields=created_at,author_id,text,conversation_id,entities"
+        f"&tweet.fields=created_at,author_id,text,conversation_id,entities,public_metrics"
         f"&expansions=author_id"
         f"&user.fields=username"
         f"&max_results=10"
@@ -522,13 +838,22 @@ def search_x_posts(current_user):
     if 'data' in results:
         users = {u['id']: u['username'] for u in results.get('includes', {}).get('users', [])}
         for tweet in results['data']:
+            metrics = tweet.get('public_metrics', {})
             posts.append({
                 "post_id": tweet['id'],
-                "text": tweet.get('text', ''),  # Full text when available
+                "text": tweet.get('text', ''),
                 "author_username": users.get(tweet['author_id'], 'unknown'),
-                "created_at": tweet['created_at']
+                "created_at": tweet['created_at'],
+                "engagement": {
+                    "retweets": metrics.get('retweet_count', 0),
+                    "replies": metrics.get('reply_count', 0),
+                    "likes": metrics.get('like_count', 0),
+                    "quotes": metrics.get('quote_count', 0),
+                    "views": metrics.get('impression_count', 0) # Free tier usually 0
+                }
             })
 
+    log_audit(current_user, "search_x_posts", f"Query: {query}")
     return jsonify({"posts": posts})
 
 @app.route('/fetch-x-post', methods=['POST'])
@@ -545,7 +870,7 @@ def fetch_x_post(current_user):
         url = (
             f"https://api.x.com/2/tweets/{post_id}?"
             f"expansions=author_id,attachments.media_keys,in_reply_to_user_id,referenced_tweets.id"
-            f"&tweet.fields=created_at,conversation_id,text,entities,attachments"
+            f"&tweet.fields=created_at,conversation_id,text,entities,attachments,public_metrics"
             f"&user.fields=username"
             f"&media.fields=media_key,type,url,preview_image_url,variants"
         )
@@ -582,33 +907,123 @@ def fetch_x_post(current_user):
                 max_bitrate = max(variants, key=lambda v: v.get('bit_rate', 0))
                 media_urls.append(max_bitrate['url'])
 
-        defamation_result = predict_defamatory(expanded_text)
+        # --- OCR Visual Analysis ---
+        visual_data = process_visual_content(media_urls)
+        visual_text = visual_data["text"]
+        
+        # We ALWAYS require confirmation if there are images, even if no text was found
+        # This allows the user to see that the system "checked" the image.
+        requires_confirmation = len(media_urls) > 0
+        
+        defamation_result = {"is_defamatory": False, "category": "Pending", "confidence": 0.0, "justification": "Awaiting human verification of media."}
+        if not requires_confirmation:
+            defamation_result = predict_defamatory(expanded_text)
+        
         logger.info(f"Defamation scan for post {post_id}: {defamation_result}")
 
+        metrics = tweet_data.get('public_metrics', {})
         post_data = {
             "id": post_id,
-            "text": expanded_text,  # Full expanded text
+            "text": expanded_text,
+            "visual_text": visual_text,
+            "visual_status": visual_data["status"],
+            "requires_confirmation": requires_confirmation,
             "author_username": author_username,
             "created_at": created_at,
             "author_id": author_id,
             "media_urls": media_urls,
+            "engagement": {
+                "retweets": metrics.get('retweet_count', 0),
+                "replies": metrics.get('reply_count', 0),
+                "likes": metrics.get('like_count', 0),
+                "quotes": metrics.get('quote_count', 0),
+                "views": metrics.get('impression_count', 0)
+            },
             "defamation": defamation_result
         }
 
-        # Store fetch in DB (your existing code)
+        # Encrypt sensitive fields for DB storage
+        enc_content = encrypt_field(expanded_text)
+        enc_author = encrypt_field(author_username)
+        enc_media = encrypt_field(json.dumps(media_urls))
+        # Embed engagement metrics into content metadata string for full compliance storage
+        engagement_json = json.dumps(post_data['engagement'])
+        enc_engagement = encrypt_field(engagement_json)
+
+        # Store fetch in DB (encrypted)
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
-            'INSERT INTO fetched_evidence (user_id, post_id, content, author_username, created_at, media_urls, timestamp, verified) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (current_user, post_id, expanded_text, author_username, created_at, json.dumps(media_urls), datetime.datetime.now().isoformat(), None)
+            'INSERT INTO fetched_evidence (user_id, post_id, content, author_username, created_at, media_urls, timestamp, verified, engagement, is_defamatory) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (current_user, post_id, enc_content, enc_author, created_at, enc_media, datetime.datetime.now().isoformat(), None, enc_engagement, 1 if defamation_result.get('is_defamatory') else 0)
         )
         conn.commit()
         conn.close()
 
+        log_audit(current_user, "fetch_x_post", f"Post ID: {post_id}")
         return jsonify(post_data), 200
     except Exception as e:
         logger.error(f"Error in fetch_x_post: {str(e)}")
+        log_audit(current_user, "fetch_x_post_failed", f"Post ID: {post_id}, Error: {str(e)}")
+        return jsonify({"error": f"Failed to fetch post. Check X API status: {str(e)}"}), 500
+
+@app.route('/analyze-content', methods=['POST'])
+@token_required
+def analyze_content(current_user):
+    try:
+        data = request.get_json()
+        tweet_text = data.get('tweet_text', '')
+        visual_text = data.get('visual_text', '')
+        
+        if not tweet_text and not visual_text:
+            return jsonify({"error": "No content provided for analysis"}), 400
+        
+        # Combined analysis for the primary flag
+        full_content = (tweet_text + "\n" + visual_text).strip()
+        result = predict_defamatory(full_content)
+        
+        # Attribution Logic: check where markers were found
+        tweet_markers = extract_forensic_markers(tweet_text)
+        visual_markers = extract_forensic_markers(visual_text)
+        
+        source = "Combined"
+        if result['is_defamatory']:
+            # Determine primary offender
+            tweet_score = len(tweet_markers['ncic']) + len(tweet_markers['defamatory'])
+            visual_score = len(visual_markers['ncic']) + len(visual_markers['defamatory'])
+            
+            if visual_score > tweet_score:
+                source = "Media Attachment"
+                result['justification'] = f"Primary evidence found inside Media: {result['justification']}"
+            elif tweet_score > visual_score:
+                source = "Tweet Text"
+                result['justification'] = f"Primary evidence found in Tweet Text: {result['justification']}"
+            else:
+                source = "Both (Tweet & Media)"
+        
+        result['evidence_source'] = source
+        
+        # Update the is_defamatory flag in the database after human verification
+        try:
+            conn = sqlite3.connect('forensic.db')
+            c = conn.cursor()
+            # Find the most recent fetch for this user/content to update the flag
+            # Note: In a more robust system, we'd pass the DB internal ID here
+            # But since content is encrypted, we'll log the intention for now.
+            # For this MVP, we'll assume the flag is set correctly during fetch or should be updated via specific ID.
+            logger.info(f"Verified is_defamatory: {result['is_defamatory']} for user {current_user}")
+            # If we had a fetched_id, we would do:
+            # c.execute('UPDATE fetched_evidence SET is_defamatory = ? WHERE id = ?', (1 if result['is_defamatory'] else 0, fetched_id))
+            conn.commit()
+            conn.close()
+        except Exception as db_e:
+            logger.error(f"Failed to update defamation flag: {db_e}")
+
+        log_audit(current_user, "analyze_content", f"Source: {source}")
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Analysis error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/store-evidence', methods=['POST'])
@@ -634,15 +1049,19 @@ def store_evidence_endpoint(current_user):
             "investigator": str(current_user),
             "content": evidence_data.get("content", ""),
             "author_username": evidence_data.get("author_username", ""),
+            "platform": evidence_data.get("platform", "Twitter"), # Default to Twitter for now
             "mediaUrls": evidence_data.get("media_urls", []),
+            "engagement": evidence_data.get("engagement", {}), 
             "defamation": defamation
         }
         logger.info(f"Sending to blockchain: {evidence_for_blockchain}")
 
         result = store_evidence(json.dumps(evidence_for_blockchain))
         if not result or result.get('evidence_id') == -1:
-            logger.error(f"Failed to store evidence: {result}")
-            return jsonify({"error": "Failed to store evidence on blockchain"}), 500
+            err_msg = result.get('error', 'Unknown failure')
+            logger.error(f"Failed to store evidence: {err_msg}")
+            log_audit(current_user, "store_evidence_failed", f"Evidence: {evidence_data.get('id','')}, Error: {err_msg}")
+            return jsonify({"error": f"Blockchain storage failed: {err_msg}"}), 503 if "unavailable" in err_msg.lower() else 500
 
         tx_hash = result['tx_hash']
         eth_tx_hash = result['eth_tx_hash']
@@ -651,12 +1070,13 @@ def store_evidence_endpoint(current_user):
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
-            'INSERT INTO stored_evidence (user_id, evidence_id, tx_hash, eth_tx_hash, timestamp) VALUES (?, ?, ?, ?, ?)',
-            (current_user, str(evidence_id), tx_hash, eth_tx_hash, datetime.datetime.now().isoformat())
+            'INSERT INTO stored_evidence (user_id, evidence_id, tx_hash, eth_tx_hash, post_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+            (current_user, str(evidence_id), tx_hash, eth_tx_hash, evidence_data.get("id"), datetime.datetime.now().isoformat())
         )
         conn.commit()
         conn.close()
 
+        log_audit(current_user, "store_evidence_success", f"ID: {evidence_id}, TX: {tx_hash}")
         return jsonify({
             "evidence_id": evidence_id,
             "tx_hash": tx_hash,
@@ -679,18 +1099,50 @@ def get_evidence_endpoint(current_user):
         if not evidence:
             return jsonify({"error": "Evidence not found"}), 404
 
-        evidence_data = {
-            "id": evidence.get('hash', ''),
-            "text": evidence.get('content', ''),
-            "author_username": evidence.get('author_username', ''),
-            "investigator": evidence.get('investigator', ''),
-            "created_at": evidence.get('timestamp', ''),
-            "media_urls": evidence.get('mediaUrls', []),
-            "defamation": evidence.get('defamation', {"is_defamatory": False, "confidence": 0.0})
-        }
+        # Privacy Authorization Check
+        if str(evidence.get('investigator')) != str(current_user):
+            log_audit(current_user, "unauthorized_retrieval_attempt", f"Evidence ID: {evidence_id}")
+            return jsonify({"error": "Unauthorized: You do not have permission to view this evidence"}), 403
+
+        # Integrity Verification Logic
+        on_chain_hash = evidence.get('hash', '')
+        content = evidence.get('content', '')
+        author = evidence.get('author_username', '')
+        timestamp = evidence.get('timestamp', '')
+        
+        is_verified = False
+        calculated_hash = None
+        verification_status = "skipped"
+        engagement_data = {}
 
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
+        
+        # 1. Find the local post_id linked to this evidence_id
+        c.execute('SELECT post_id FROM stored_evidence WHERE evidence_id = ? LIMIT 1', (str(evidence_id),))
+        stored_row = c.fetchone()
+        
+        if stored_row:
+            post_id = stored_row[0]
+            # 2. Get the full metadata from the original fetch
+            c.execute('SELECT engagement FROM fetched_evidence WHERE post_id = ? LIMIT 1', (post_id,))
+            fetch_row = c.fetchone()
+            if fetch_row and fetch_row[0]:
+                try:
+                    engagement_data = json.loads(decrypt_field(fetch_row[0]))
+                except Exception:
+                    engagement_data = {}
+
+            # 3. Recalculate hash for verification
+            calculated_hash = generate_evidence_hash(content, author, post_id, timestamp)
+            if calculated_hash == on_chain_hash:
+                is_verified = True
+                verification_status = "verified"
+                c.execute('UPDATE fetched_evidence SET verified = 1 WHERE post_id = ?', (post_id,))
+            else:
+                verification_status = "tampered"
+                c.execute('UPDATE fetched_evidence SET verified = 0 WHERE post_id = ?', (post_id,))
+
         c.execute(
             'INSERT INTO requests_log (user_id, request_type, timestamp) VALUES (?, ?, ?)',
             (current_user, 'retrieval', datetime.datetime.now().isoformat())
@@ -698,6 +1150,25 @@ def get_evidence_endpoint(current_user):
         conn.commit()
         conn.close()
 
+        evidence_data = {
+            "evidence_id": evidence_id,
+            "id": on_chain_hash,
+            "text": content,
+            "author_username": author,
+            "investigator": evidence.get('investigator', ''),
+            "created_at": timestamp,
+            "media_urls": evidence.get('mediaUrls', []),
+            "engagement": engagement_data,
+            "defamation": evidence.get('defamation', {"is_defamatory": False, "confidence": 0.0}),
+            "verification": {
+                "is_verified": is_verified,
+                "status": verification_status,
+                "calculated_hash": calculated_hash,
+                "on_chain_hash": on_chain_hash
+            }
+        }
+
+        log_audit(current_user, "retrieve_evidence_by_id", f"Evidence ID: {evidence_id}")
         return jsonify({"evidence_id": evidence_id, "data": evidence_data}), 200
     except Exception as e:
         logger.error(f"Failed to retrieve evidence: {str(e)}")
@@ -720,19 +1191,50 @@ def retrieve_evidence(current_user):
         if not evidence:
             return jsonify({"error": "Evidence not found for transaction hash"}), 404
 
-        evidence_data = {
-            "evidence_id": evidence.get('evidence_id', ''),
-            "id": evidence.get('hash', ''),
-            "text": evidence.get('content', ''),
-            "author_username": evidence.get('author_username', ''),
-            "investigator": evidence.get('investigator', ''),
-            "created_at": evidence.get('timestamp', ''),
-            "media_urls": evidence.get('mediaUrls', []),
-            "defamation": evidence.get('defamation', {"is_defamatory": False, "confidence": 0.0})
-        }
+        # Privacy Authorization Check
+        if str(evidence.get('investigator')) != str(current_user):
+            log_audit(current_user, "unauthorized_retrieval_attempt", f"TX: {normalized_tx_hash}")
+            return jsonify({"error": "Unauthorized: You do not have permission to view this evidence"}), 403
+
+        # Integrity Verification Logic
+        on_chain_hash = evidence.get('hash', '')
+        content = evidence.get('content', '')
+        author = evidence.get('author_username', '')
+        timestamp = evidence.get('timestamp', '')
+        evidence_id = evidence.get('evidence_id', '')
+        
+        is_verified = False
+        calculated_hash = None
+        verification_status = "skipped"
+        engagement_data = {}
 
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
+        # 1. Find the local post_id linked to this on_chain_hash
+        c.execute('SELECT post_id FROM stored_evidence WHERE tx_hash = ? LIMIT 1', (on_chain_hash,))
+        stored_row = c.fetchone()
+        
+        if stored_row:
+            post_id = stored_row[0]
+            # 2. Get local metadata
+            c.execute('SELECT engagement FROM fetched_evidence WHERE post_id = ? LIMIT 1', (post_id,))
+            fetch_row = c.fetchone()
+            if fetch_row and fetch_row[0]:
+                try:
+                    engagement_data = json.loads(decrypt_field(fetch_row[0]))
+                except Exception:
+                    engagement_data = {}
+
+            # 3. Verify
+            calculated_hash = generate_evidence_hash(content, author, post_id, timestamp)
+            if calculated_hash == on_chain_hash:
+                is_verified = True
+                verification_status = "verified"
+                c.execute('UPDATE fetched_evidence SET verified = 1 WHERE post_id = ?', (post_id,))
+            else:
+                verification_status = "tampered"
+                c.execute('UPDATE fetched_evidence SET verified = 0 WHERE post_id = ?', (post_id,))
+
         c.execute(
             'INSERT INTO requests_log (user_id, request_type, timestamp) VALUES (?, ?, ?)',
             (current_user, 'retrieval', datetime.datetime.now().isoformat())
@@ -740,6 +1242,25 @@ def retrieve_evidence(current_user):
         conn.commit()
         conn.close()
 
+        evidence_data = {
+            "evidence_id": evidence_id,
+            "id": on_chain_hash,
+            "text": content,
+            "author_username": author,
+            "investigator": evidence.get('investigator', ''),
+            "created_at": timestamp,
+            "media_urls": evidence.get('mediaUrls', []),
+            "engagement": engagement_data,
+            "defamation": evidence.get('defamation', {"is_defamatory": False, "confidence": 0.0}),
+            "verification": {
+                "is_verified": is_verified,
+                "status": verification_status,
+                "calculated_hash": calculated_hash,
+                "on_chain_hash": on_chain_hash
+            }
+        }
+
+        log_audit(current_user, "retrieve_evidence_by_hash", f"TX: {normalized_tx_hash}")
         return jsonify(evidence_data), 200
     except Exception as e:
         logger.error(f"Failed to retrieve evidence by tx hash: {str(e)}")
@@ -790,10 +1311,10 @@ def report(current_user, user_id):
     fetched = [{
         'id': r[0],
         'post_id': r[1],
-        'content': r[2],
-        'author_username': r[3],
+        'content': decrypt_field(r[2]),
+        'author_username': decrypt_field(r[3]),
         'created_at': r[4],
-        'media_urls': json.loads(r[5]),
+        'media_urls': json.loads(decrypt_field(r[5])),
         'timestamp': r[6],
         'verified': r[7]
     } for r in c.fetchall()]
@@ -821,38 +1342,63 @@ def report_stats(current_user, user_id):
     c = conn.cursor()
 
     now = datetime.datetime.now()
+    month_ago = now - timedelta(days=30)
     week_ago = now - timedelta(days=7)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
     yesterday_end = today_start - timedelta(seconds=1)
 
-    def count(request_type, start, end=None):
+    def get_detailed_stats(start, end=None):
+        # Use current_user (int) to ensure reliable matching
+        uid = int(current_user)
+        params = [uid, start.isoformat()]
+        time_filter = "AND timestamp >= ?"
         if end:
-            c.execute(
-                'SELECT COUNT(*) FROM requests_log WHERE user_id = ? AND request_type = ? AND timestamp >= ? AND timestamp < ?',
-                (user_id, request_type, start.isoformat(), end.isoformat())
-            )
-        else:
-            c.execute(
-                'SELECT COUNT(*) FROM requests_log WHERE user_id = ? AND request_type = ? AND timestamp >= ?',
-                (user_id, request_type, start.isoformat())
-            )
-        return c.fetchone()[0]
+            params.append(end.isoformat())
+            time_filter = "AND timestamp >= ? AND timestamp < ?"
+        
+        # Scanned Count
+        c.execute(f'SELECT COUNT(*) FROM fetched_evidence WHERE user_id = ? {time_filter}', params)
+        scanned = c.fetchone()[0]
+        
+        # Secured Count
+        c.execute(f'SELECT COUNT(*) FROM stored_evidence WHERE user_id = ? {time_filter}', params)
+        secured = c.fetchone()[0]
+        
+        # Threats Count
+        c.execute(f'SELECT COUNT(*) FROM fetched_evidence WHERE user_id = ? AND is_defamatory = 1 {time_filter}', params)
+        threats = c.fetchone()[0]
 
-    weekly_fetches = count('fetch', week_ago)
-    weekly_retrievals = count('retrieval', week_ago)
-    yesterday_fetches = count('fetch', yesterday_start, yesterday_end)
-    yesterday_retrievals = count('retrieval', yesterday_start, yesterday_end)
-    today_fetches = count('fetch', today_start)
-    today_retrievals = count('retrieval', today_start)
+        # Graph Data: Total Fetches for the period
+        # Since requests_log might be empty, we use fetched_evidence records as activity proxy
+        c.execute(f'SELECT COUNT(*) FROM fetched_evidence WHERE user_id = ? {time_filter}', params)
+        fetches = c.fetchone()[0]
+        
+        # Graph Data: Total Secured for the period (as retrievals proxy)
+        c.execute(f'SELECT COUNT(*) FROM stored_evidence WHERE user_id = ? {time_filter}', params)
+        retrievals = c.fetchone()[0]
+
+        return {
+            'scanned': scanned, 
+            'secured': secured, 
+            'threats': threats,
+            'fetches': fetches,
+            'retrievals': retrievals
+        }
+
+    monthly = get_detailed_stats(month_ago)
+    weekly = get_detailed_stats(week_ago)
+    yesterday = get_detailed_stats(yesterday_start, yesterday_end)
+    today = get_detailed_stats(today_start)
 
     conn.close()
 
     return jsonify({
-        'weekly': {'fetches': weekly_fetches, 'retrievals': weekly_retrievals},
+        'monthly': monthly,
+        'weekly': weekly,
         'daily': {
-            'yesterday': {'fetches': yesterday_fetches, 'retrievals': yesterday_retrievals},
-            'today': {'fetches': today_fetches, 'retrievals': today_retrievals}
+            'yesterday': yesterday,
+            'today': today
         }
     })
 
@@ -869,11 +1415,27 @@ def generate_report(current_user, user_id):
 
     c.execute('SELECT post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
     fetched = c.fetchall()
+    
+    # Decrypt fetched data for report
+    decrypted_fetched = []
+    for r in fetched:
+        decrypted_fetched.append((
+            r[0], # post_id
+            decrypt_field(r[1]), # content
+            decrypt_field(r[2]), # author_username
+            r[3], # created_at
+            json.loads(decrypt_field(r[4])) if r[4] else [], # media_urls
+            r[5], # timestamp
+            r[6]  # verified
+        ))
+    fetched = decrypted_fetched
 
     c.execute('SELECT evidence_id, tx_hash, eth_tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
     stored = c.fetchall()
 
     conn.close()
+    
+    log_audit(current_user, "generate_report", f"User: {user_id}")
 
     html_content = f"""
     <html>
@@ -920,6 +1482,395 @@ def generate_report(current_user, user_id):
     response.headers['Content-Disposition'] = f'attachment; filename=forensic_report_{user_id}.pdf'
     return response
 
+# ═══════════════════════════════════════════════════════════════
+# ═══════════════════ CHATBOT ENDPOINTS ════════════════════════
+# ═══════════════════════════════════════════════════════════════
+
+import uuid
+
+# ── Knowledge Base ───────────────────────────────────────────
+CHATBOT_KB = {
+    "greeting": {
+        "keywords": ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", "greetings"],
+        "response": "Welcome to ChainForensix! I'm your digital forensics assistant. I can help you with:\n\n• Understanding how our platform works\n• Troubleshooting errors you might encounter\n• Guiding you through the analysis workflow\n• Scheduling a consultation with a forensic expert\n\nHow can I assist you today?"
+    },
+    "what_is": {
+        "keywords": ["what is chainforensix", "what does this do", "what is this platform", "what do you do", "about", "purpose", "explain the system"],
+        "response": "ChainForensix is an AI-powered forensic evidence platform for social media content. Here's what we do:\n\n1. **Fetch & Capture** — Scrape X (Twitter) posts with full metadata\n2. **AI Analysis** — Our Afro-XLMR model classifies content as Safe, Defamatory, or Hate Speech\n3. **Blockchain Anchoring** — Store evidence immutably on Ethereum (Sepolia) for legal integrity\n4. **Verification** — Retrieve and cryptographically verify stored evidence\n5. **Reporting** — Generate forensic reports with full audit trails\n\nWould you like to know more about any of these features?"
+    },
+    "how_it_works": {
+        "keywords": ["how does it work", "how it works", "workflow", "process", "steps", "how to use"],
+        "response": "Here's the ChainForensix workflow:\n\n**Step 1: Login/Register** — Create an account and verify your email\n**Step 2: Fetch a Post** — Go to the Analysis page, enter an X Post ID or search by content\n**Step 3: AI Classification** — Our model analyzes the content for defamatory or hate speech patterns\n**Step 4: Store on Blockchain** — Click 'Secure on Blockchain' to create an immutable evidence record\n**Step 5: Retrieve & Verify** — Use the Evidence page to retrieve and verify stored evidence\n**Step 6: Generate Reports** — Create professional forensic reports from the Reports page\n\nNeed help with a specific step?"
+    },
+    "fetch_help": {
+        "keywords": ["fetch", "scrape", "post id", "how to fetch", "analysis page", "find a post", "get a tweet"],
+        "response": "To fetch an X post for analysis:\n\n1. Navigate to the **Analysis** page (you must be logged in)\n2. Enter the **Post ID** — this is the number at the end of a tweet URL (e.g., from twitter.com/user/status/**1234567890**)\n3. Or use **Search by Content** — paste the text from the post and we'll find matching tweets\n4. Click **Initialize Forensic Fetch**\n5. Review the AI analysis results\n6. Click **Secure on Blockchain** to store the evidence\n\nHaving trouble? Let me know the specific error you're seeing."
+    },
+    "blockchain_help": {
+        "keywords": ["blockchain", "store evidence", "ethereum", "sepolia", "smart contract", "immutable", "tx hash", "transaction"],
+        "response": "ChainForensix uses the **Ethereum Sepolia testnet** to store evidence:\n\n• Each piece of evidence gets a unique **Evidence ID** and **Transaction Hash**\n• The content hash is stored on-chain — making it tamper-proof\n• You can verify any evidence by checking the hash on Sepolia Etherscan\n• The blockchain record proves the evidence existed at a specific point in time\n\nNote: Blockchain storage may take 15-30 seconds depending on network conditions. If you see a timeout error, try again in a moment."
+    },
+    "retrieve_help": {
+        "keywords": ["retrieve", "verify", "evidence page", "get evidence", "check evidence", "verification"],
+        "response": "To retrieve and verify stored evidence:\n\n1. Go to the **Evidence** page\n2. Your stored evidence will be listed automatically\n3. Click on any evidence entry to see full details\n4. The system re-calculates the content hash and compares it to the blockchain record\n5. A green checkmark means the evidence is intact and verified\n\nYou can also search by Evidence ID or Transaction Hash."
+    },
+    "report_help": {
+        "keywords": ["report", "generate report", "pdf", "forensic report", "download report", "reports page"],
+        "response": "To generate a forensic report:\n\n1. Go to the **Reports** page\n2. View your analysis statistics and activity metrics\n3. Click **Generate Report** to create a professional PDF\n4. The report includes: evidence summary, AI classification results, blockchain verification, and audit trail\n\nReports are downloadable as PDF files for legal or investigative use."
+    },
+    "pricing": {
+        "keywords": ["pricing", "cost", "how much", "free", "paid", "subscription", "plans"],
+        "response": "ChainForensix is currently available for use. For detailed pricing information and enterprise plans, I'd recommend speaking with one of our experts who can tailor a solution to your needs.\n\nWould you like to schedule a consultation with a forensic expert?"
+    },
+    "schedule": {
+        "keywords": ["schedule", "appointment", "consultation", "book", "meeting", "call"],
+        "response": "__SCHEDULE_FORM__"
+    },
+    "talk_to_expert": {
+        "keywords": ["talk to expert", "human", "real person", "speak to someone", "support agent", "talk to someone", "human expert", "speak to expert"],
+        "response": "__ESCALATE__"
+    },
+    "methodology": {
+        "keywords": ["methodology", "ai model", "afro-xlmr", "how does the ai work", "classification", "machine learning", "nlp"],
+        "response": "Our AI engine uses **Afro-XLMR**, a multilingual transformer model optimized for African languages:\n\n• **3-Class Classification**: Safe, Defamatory, Hate Speech\n• **Forensic Lexicons**: Custom dictionaries for Kenyan political speech, NCIC-monitored terms, and security-related language\n• **Dual-Evidence Analysis**: Analyzes both tweet text and OCR-extracted text from images\n• **Confidence Scoring**: Provides probability scores for each classification category\n\nYou can read more on our Methodology page. Need more technical details?"
+    }
+}
+
+# ── Error Troubleshooting Knowledge Base ─────────────────────
+ERROR_KB = {
+    "rate_limit": {
+        "keywords": ["too many requests", "429", "rate limit", "rate-limit", "ratelimit", "slow down", "limit exceeded"],
+        "response": "**Rate Limit Error (429 — Too Many Requests)**\n\nThis happens when you've made too many API calls in a short period. Our limits are:\n• 200 requests per day\n• 50 requests per hour\n• 20 search queries per hour\n\n**What to do:**\n1. Wait 10-15 minutes before trying again\n2. Avoid rapid-fire submissions — wait for each request to complete\n3. Use Post ID instead of text search when possible (it's more efficient)\n4. If you need higher limits for professional use, consider scheduling a consultation\n\nThe rate limit resets automatically."
+    },
+    "auth_expired": {
+        "keywords": ["token expired", "token has expired", "session expired", "logged out", "expired"],
+        "response": "**Session Expired**\n\nYour login session lasts 24 hours. When it expires:\n\n1. You'll be redirected to the login page\n2. Simply log in again with your credentials\n3. Your evidence and reports are safely stored and will be there when you return\n\nTip: If this happens frequently, make sure your browser isn't clearing cookies automatically."
+    },
+    "auth_missing": {
+        "keywords": ["token is missing", "401", "unauthorized", "not authenticated", "missing token"],
+        "response": "**Authentication Error (401)**\n\nThis means you're not logged in or your session is invalid.\n\n**What to do:**\n1. Go to the **Login** page and sign in\n2. If you just registered, check your email for the **activation link** first\n3. Make sure cookies are enabled in your browser\n4. Try clearing your browser cache and logging in again\n\nStill having issues? I can connect you with our support team."
+    },
+    "account_not_activated": {
+        "keywords": ["not activated", "403", "activation", "activate account", "check your email", "activation link"],
+        "response": "**Account Not Activated (403)**\n\nYour account exists but hasn't been activated yet.\n\n**What to do:**\n1. Check your email inbox (and spam/junk folder) for the activation email from ChainForensix\n2. Click the activation link in the email\n3. If you can't find it, go to the Login page and click **'Resend Activation Email'**\n4. The activation link expires after 1 hour — request a new one if needed\n\nOnce activated, you can log in normally."
+    },
+    "network_error": {
+        "keywords": ["network error", "connection", "could not connect", "timeout", "server down", "unreachable", "fetch failed"],
+        "response": "**Network / Connection Error**\n\nThis usually means the server is temporarily unreachable.\n\n**What to do:**\n1. Check your internet connection\n2. Try refreshing the page\n3. Wait 30 seconds and try again — our server may be restarting\n4. If using the system for the first time after a period of inactivity, the server may need 1-2 minutes to wake up (we use Render free tier)\n\nIf the problem persists for more than 5 minutes, it may be a server issue."
+    },
+    "blockchain_error": {
+        "keywords": ["error storing", "blockchain error", "store error", "store failed", "eth_tx_hash", "smart contract", "gas"],
+        "response": "**Blockchain Storage Error**\n\nThis can happen due to Ethereum network congestion or configuration issues.\n\n**What to do:**\n1. Wait 30-60 seconds and try the 'Secure on Blockchain' button again\n2. Check that the post was fetched successfully (you need fetched data first)\n3. If you see 'gas' related errors — the network might be congested, try again later\n4. The evidence is still saved in our database even if the blockchain step fails\n\nNeed urgent help? I can escalate this to our technical team."
+    },
+    "analysis_error": {
+        "keywords": ["error analyzing", "analysis failed", "model error", "prediction error", "ai error", "classification error"],
+        "response": "**AI Analysis Error**\n\nThe forensic AI model encountered an issue during content classification.\n\n**What to do:**\n1. Try submitting the content again\n2. If the post contains only images with no text, the OCR model may need to initialize first\n3. Very short text (< 5 characters) may not produce reliable results\n4. If the error persists, the model service may be restarting\n\nThe system defaults to 'Safe' classification when the model is unavailable, so no data is lost."
+    },
+    "registration_error": {
+        "keywords": ["registration failed", "registration error", "can't register", "signup failed", "username taken", "password requirements"],
+        "response": "**Registration Error**\n\nCommon registration issues:\n\n**Username requirements:**\n• At least 3 characters\n• Only letters, numbers, and underscores\n\n**Password requirements:**\n• At least 8 characters\n• Must include: uppercase, lowercase, number, and special character (@$!%*?&)\n\n**Other issues:**\n• Username or email already in use — try a different one\n• Make sure all fields are filled in\n\nNeed a human to help you? I can connect you with support."
+    },
+    "password_reset": {
+        "keywords": ["forgot password", "reset password", "can't login", "wrong password", "reset link", "password reset"],
+        "response": "**Password Reset**\n\n1. Go to the **Login** page\n2. Click **'Forgot Password?'**\n3. Enter your registered email address\n4. Check your inbox (and spam folder) for the reset link\n5. Click the link and set a new password\n\n**Note:** The reset link expires in 1 hour. Your new password must meet the same requirements as registration (8+ chars, mixed case, number, special character)."
+    },
+    "generic_error": {
+        "keywords": ["error", "something went wrong", "not working", "broken", "issue", "problem", "bug", "fail"],
+        "response": "I see you're experiencing an issue. To help you better, could you tell me:\n\n1. **Which page** are you on? (Analysis, Evidence, Reports, Login)\n2. **What were you trying to do?** (Fetching a post, storing evidence, generating a report)\n3. **What's the exact error message** you're seeing?\n\nOr you can paste the error text here and I'll help diagnose it.\n\nIf you'd prefer, I can connect you with a human expert who can help directly."
+    }
+}
+
+# ── Page-Context Error Mapping (for authenticated users) ────
+PAGE_CONTEXT_HELP = {
+    "analyze": {
+        "context": "Analysis / Fetch page",
+        "common_errors": [
+            "**Too Many Requests (429):** You've hit the rate limit. Wait 10-15 min or use Post ID instead of text search.",
+            "**Network Error:** Server may be waking up. Wait 30 seconds and retry.",
+            "**Post Not Found:** Double-check the Post ID — it should be the number at the end of the tweet URL.",
+            "**OCR Service Unavailable:** The image text reader is still initializing. You can manually enter text from images."
+        ]
+    },
+    "retrieve": {
+        "context": "Evidence Retrieval page",
+        "common_errors": [
+            "**No Evidence Found:** You may not have stored any evidence yet. Go to Analysis first.",
+            "**Verification Failed:** The content hash doesn't match — this could indicate tampering.",
+            "**Network Error:** Server may be waking up. Wait and retry."
+        ]
+    },
+    "report": {
+        "context": "Reports page",
+        "common_errors": [
+            "**PDF Generation Failed:** The report service may need wkhtmltopdf installed on the server.",
+            "**No Data:** You need to have analyzed and stored evidence before generating reports.",
+            "**Metrics Showing Zero:** This is normal if you haven't performed any actions recently."
+        ]
+    },
+    "login": {
+        "context": "Login / Authentication",
+        "common_errors": [
+            "**Invalid Credentials:** Check your username and password for typos.",
+            "**Account Not Activated:** Check your email for the activation link.",
+            "**Rate Limited:** Too many login attempts. Wait a few minutes."
+        ]
+    }
+}
+
+def get_chatbot_response(message, page_context=None, is_authenticated=False):
+    """Process user message and return an appropriate bot response."""
+    msg_lower = message.lower().strip()
+    
+    # 1. Check for error-related queries first (higher priority when authenticated)
+    if is_authenticated:
+        # Check if the user is pasting an actual error message
+        for key, entry in ERROR_KB.items():
+            for kw in entry["keywords"]:
+                if kw in msg_lower:
+                    response = entry["response"]
+                    # Append page-specific context if available
+                    if page_context and page_context in PAGE_CONTEXT_HELP:
+                        ctx = PAGE_CONTEXT_HELP[page_context]
+                        response += f"\n\n---\n**Common issues on the {ctx['context']}:**\n"
+                        response += "\n".join(f"• {e}" for e in ctx["common_errors"])
+                    return {"type": "error_help", "response": response}
+    
+    # Also check errors for unauthenticated users (auth-related)
+    for key, entry in ERROR_KB.items():
+        for kw in entry["keywords"]:
+            if kw in msg_lower:
+                return {"type": "error_help", "response": entry["response"]}
+    
+    # 2. Check general knowledge base
+    for key, entry in CHATBOT_KB.items():
+        for kw in entry["keywords"]:
+            if kw in msg_lower:
+                resp = entry["response"]
+                if resp == "__SCHEDULE_FORM__":
+                    return {"type": "schedule", "response": "I'd be happy to help you schedule a consultation with one of our forensic experts. Please fill in the form below."}
+                if resp == "__ESCALATE__":
+                    return {"type": "escalate", "response": "I'll connect you with a human expert. Let me record our conversation so they have full context when they reach out to you. Please provide your contact details."}
+                return {"type": "info", "response": resp}
+    
+    # 3. Page context help (when authenticated and on a specific page)
+    if page_context and page_context in PAGE_CONTEXT_HELP:
+        ctx = PAGE_CONTEXT_HELP[page_context]
+        page_response = f"I see you're on the **{ctx['context']}**. Here are some common issues and solutions:\n\n"
+        page_response += "\n".join(f"• {e}" for e in ctx["common_errors"])
+        page_response += "\n\nCould you describe the specific issue you're facing? Or paste the error message you see."
+        return {"type": "page_help", "response": page_response}
+    
+    # 4. Fallback
+    return {
+        "type": "fallback",
+        "response": "I'm not sure I understand that question yet. Here's what I can help with:\n\n• **How ChainForensix works** — ask me about the platform\n• **Troubleshooting errors** — paste any error message and I'll help\n• **Feature guidance** — ask about fetching, analysis, blockchain, or reports\n• **Schedule a consultation** — book time with a forensic expert\n• **Talk to a human** — I can escalate to our support team\n\nOr try asking in a different way!"
+    }
+
+# --- Chatbot Owner Notifications (Brevo/Sib API) ---
+def send_owner_email(subject, html_content):
+    """Send an email notification to the site owner using Brevo (Sib) API."""
+    api_key = os.getenv('BREVO_API_KEY')
+    if not api_key:
+        logger.warning("BREVO_API_KEY not found in environment. Email notification skipped.")
+        return False
+        
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "accept": "application/json",
+        "api-key": api_key,
+        "content-type": "application/json"
+    }
+    
+    payload = {
+        "sender": {"name": "ChainForensix Assistant", "email": "briannjoki619@gmail.com"},
+        "to": [{"email": "briannjoki619@gmail.com", "name": "Forensic Expert"}],
+        "subject": subject,
+        "htmlContent": html_content
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.status_code in [201, 202, 200]:
+            logger.info(f"Owner notification email sent successfully: {subject}")
+            return True
+        else:
+            logger.error(f"Failed to send Brevo email: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Error sending Brevo email: {e}")
+        return False
+
+@app.route('/chatbot/message', methods=['POST'])
+def chatbot_message():
+    data = request.get_json()
+    message = data.get('message', '').strip()
+    session_id = data.get('session_id', str(uuid.uuid4()))
+    page_context = data.get('page_context', '')
+    
+    if not message:
+        return jsonify({'error': 'Message is required'}), 400
+    
+    # Check if user is authenticated
+    is_authenticated = False
+    try:
+        token = request.cookies.get('token') or (request.headers.get('Authorization', '').split(' ')[1] if request.headers.get('Authorization', '').startswith('Bearer ') else None)
+        if token:
+            jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            is_authenticated = True
+    except:
+        pass
+    
+    # Get response from the knowledge engine
+    result = get_chatbot_response(message, page_context, is_authenticated)
+    
+    # Store the conversation
+    try:
+        timestamp = datetime.datetime.now().isoformat()
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('INSERT INTO chatbot_conversations (session_id, role, message, page_context, timestamp) VALUES (?, ?, ?, ?, ?)',
+                  (session_id, 'user', message, page_context, timestamp))
+        c.execute('INSERT INTO chatbot_conversations (session_id, role, message, page_context, timestamp) VALUES (?, ?, ?, ?, ?)',
+                  (session_id, 'bot', result['response'], page_context, timestamp))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Chatbot conversation logging failed: {e}")
+    
+    return jsonify({
+        'response': result['response'],
+        'type': result['type'],
+        'session_id': session_id
+    }), 200
+
+@app.route('/chatbot/schedule', methods=['POST'])
+def chatbot_schedule():
+    data = request.get_json()
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip()
+    phone = data.get('phone', '').strip()
+    topic = data.get('topic', '').strip()
+    preferred_date = data.get('preferred_date', '').strip()
+    preferred_time = data.get('preferred_time', '').strip()
+    msg = data.get('message', '').strip()
+    session_id = data.get('session_id', '')
+    
+    if not name or not email:
+        return jsonify({'error': 'Name and email are required'}), 400
+    
+    # Validate email format
+    if not re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', email):
+        return jsonify({'error': 'Please provide a valid email address'}), 400
+    
+    try:
+        timestamp = datetime.datetime.now().isoformat()
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute(
+            'INSERT INTO expert_appointments (name, email, phone, topic, preferred_date, preferred_time, message, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (name, email, phone, topic, preferred_date, preferred_time, msg, 'pending', timestamp)
+        )
+        conn.commit()
+        conn.close()
+        
+        # Log in chatbot conversation
+        if session_id:
+            conn = sqlite3.connect('forensic.db')
+            c = conn.cursor()
+            c.execute('INSERT INTO chatbot_conversations (session_id, role, message, timestamp) VALUES (?, ?, ?, ?)',
+                      (session_id, 'system', f'Appointment scheduled: {name}, {email}, {topic}', timestamp))
+            conn.commit()
+            conn.close()
+        
+        # Notify owner via email
+        email_subject = f"New Consultation: {name} - {topic}"
+        email_body = f"""
+        <h3>New Forensic Expert Consultation Requested</h3>
+        <p><strong>Name:</strong> {name}</p>
+        <p><strong>Email:</strong> {email}</p>
+        <p><strong>Phone:</strong> {phone}</p>
+        <p><strong>Topic:</strong> {topic}</p>
+        <p><strong>Preferred Date:</strong> {preferred_date}</p>
+        <p><strong>Preferred Time:</strong> {preferred_time}</p>
+        <p><strong>Message:</strong> {msg}</p>
+        <hr>
+        <p>This request was submitted via the ChainForensix Assistant Chatbot.</p>
+        """
+        send_owner_email(email_subject, email_body)
+        
+        return jsonify({
+            'message': f'Appointment scheduled successfully! Our forensic expert will reach out to you at {email}.',
+            'type': 'schedule_confirmed'
+        }), 201
+    except Exception as e:
+        logger.error(f"Appointment scheduling failed: {e}")
+        return jsonify({'error': 'Failed to schedule appointment. Please try again.'}), 500
+
+@app.route('/chatbot/escalate', methods=['POST'])
+def chatbot_escalate():
+    data = request.get_json()
+    session_id = data.get('session_id', '')
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip()
+    summary = data.get('summary', '').strip()
+    
+    if not email:
+        return jsonify({'error': 'Email is required so our expert can reach you'}), 400
+    
+    try:
+        timestamp = datetime.datetime.now().isoformat()
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        
+        # Mark all messages in this session as escalated
+        if session_id:
+            c.execute('UPDATE chatbot_conversations SET escalated = 1 WHERE session_id = ?', (session_id,))
+        
+        # Store the escalation as an appointment with high priority
+        c.execute(
+            'INSERT INTO expert_appointments (name, email, phone, topic, message, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (name or 'Website Visitor', email, '', 'Live Support Request', 
+             f'Escalated from chatbot. Session: {session_id}. Summary: {summary}', 
+             'escalated', timestamp)
+        )
+        
+        # Log the escalation
+        c.execute('INSERT INTO chatbot_conversations (session_id, role, message, timestamp) VALUES (?, ?, ?, ?)',
+                  (session_id, 'system', f'Conversation escalated to human expert. Contact: {email}', timestamp))
+        
+        conn.commit()
+        conn.close()
+        
+        # Notify owner via email
+        email_subject = f"HIGH PRIORITY: Chatbot Escalation from {email}"
+        email_body = f"""
+        <h3>Chatbot Escalation Support Request</h3>
+        <p><strong>Visitor Email:</strong> {email}</p>
+        <p><strong>Visitor Name:</strong> {name or 'Website Visitor'}</p>
+        <p><strong>Session ID:</strong> {session_id}</p>
+        <p><strong>Issue Summary / Conversation Content:</strong></p>
+        <div style="background: #f4f4f4; padding: 15px; border-radius: 5px; white-space: pre-wrap;">
+        {summary}
+        </div>
+        <hr>
+        <p>Please review the full conversation in the dashboard and reach out to the visitor immediately.</p>
+        """
+        send_owner_email(email_subject, email_body)
+
+        return jsonify({
+            'message': f'Your conversation has been recorded and flagged for our expert team. A specialist will reach out to you at {email} as soon as possible.',
+            'type': 'escalated'
+        }), 200
+    except Exception as e:
+        logger.error(f"Chatbot escalation failed: {e}")
+        return jsonify({'error': 'Failed to escalate. Please try again or email us directly at briannjoki619@gmail.com'}), 500
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    response = make_response(jsonify({'message': 'Logged out'}), 200)
+    response.delete_cookie('token', path='/')
+    return response
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=os.getenv('FLASK_ENV') == 'development')

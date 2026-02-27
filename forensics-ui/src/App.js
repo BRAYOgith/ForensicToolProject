@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
-import UseCasesPage from './UseCasesPage';
 import FetchPage from './FetchPage';
 import RetrievePage from './RetrievePage';
 import LoginPage from './LoginPage';
@@ -10,10 +9,16 @@ import LandingPage from './LandingPage';
 import ResetPasswordPage from './ResetPasswordPage';
 import MethodologyPage from './MethodologyPage';
 import DocumentationPage from './DocumentationPage';
+import UseCasesPage from './UseCasesPage';
 import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
 import Footer from './Footer';
+import ChatbotWidget from './components/ChatbotWidget';
 import './index.css';
+
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:5000'
+  : 'https://chainforensix-api.onrender.com'; // Replace with your production URL
 
 function ActivatePage() {
   const [searchParams] = useSearchParams();
@@ -31,7 +36,7 @@ function ActivatePage() {
 
     const activateAccount = async () => {
       try {
-        const response = await fetch(`https://forensictoolproject.onrender.com/activate?token=${token}`);
+        const response = await fetch(`${API_BASE}/activate?token=${token}`);
 
         if (response.ok) {
           setMessage('Account activated successfully! Redirecting to login...');
@@ -100,7 +105,10 @@ function MainLayout() {
     localStorage.setItem('pwd', isPwdMode);
   }, [isPwdMode]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE}/logout`, { method: 'POST', credentials: 'include' });
+    } catch (e) { /* proceed with client-side cleanup even if server call fails */ }
     localStorage.removeItem('token');
     localStorage.removeItem('user_id');
     localStorage.removeItem('username');
@@ -112,10 +120,16 @@ function MainLayout() {
 
   return (
     <div className="min-h-screen flex flex-col font-sans transition-colors duration-300">
-      <nav className="bg-[var(--bg-color)]/80 backdrop-blur-md border-b border-[var(--border-color)] px-6 py-4 sticky top-0 z-50">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-orange-500 focus:text-white focus:rounded-md">
+        Skip to main content
+      </a>
+
+      <nav role="navigation" aria-label="Main Navigation" className="bg-[var(--bg-color)]/80 backdrop-blur-md border-b border-[var(--border-color)] px-6 py-4 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center">
-          <Link to="/" className="flex items-center gap-3 text-2xl font-bold text-[var(--text-primary)] mb-4 sm:mb-0 group">
-            <img src="/logo.png" alt="ChainForensix Logo" className="w-10 h-10 object-contain" />
+          <Link to="/" className="flex items-center gap-3 text-2xl font-bold text-[var(--text-primary)] mb-4 sm:mb-0 group" aria-label="ChainForensix Home">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center overflow-hidden border border-white/10">
+              <img src="/logo.png" alt="" role="presentation" className="w-full h-full object-cover" />
+            </div>
             <span className="tracking-tight font-heading">ChainForensix</span>
           </Link>
           <div className="flex flex-wrap justify-center items-center gap-6">
@@ -124,6 +138,7 @@ function MainLayout() {
                 onClick={togglePwd}
                 className={`p-2 rounded-lg bg-[var(--bg-secondary)] transition-all text-xs font-bold uppercase tracking-widest ${isPwdMode ? 'text-orange-500 border border-orange-500/30' : 'text-[var(--text-primary)] hover:text-accent'}`}
                 title="Toggle Accessibility Mode"
+                aria-pressed={isPwdMode}
               >
                 PWD: {isPwdMode ? 'ON' : 'OFF'}
               </button>
@@ -131,30 +146,10 @@ function MainLayout() {
 
             {!isAuthenticated ? (
               <>
-                <Link
-                  to="/"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Home
-                </Link>
-                <Link
-                  to="/methodology"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Methodology
-                </Link>
-                <Link
-                  to="/docs"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Docs
-                </Link>
-                <Link
-                  to="/use-cases"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Use Cases
-                </Link>
+                <Link to="/" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Home</Link>
+                <Link to="/methodology" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Methodology</Link>
+                <Link to="/docs" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Docs</Link>
+                <Link to="/use-cases" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Use Cases</Link>
                 <Link
                   to="/login"
                   className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors border border-[var(--border-color)] hover:border-[var(--accent-primary)] px-5 py-2 rounded-md hover:bg-[var(--bg-secondary)]"
@@ -164,27 +159,13 @@ function MainLayout() {
               </>
             ) : (
               <>
-                <Link
-                  to="/analyze"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Analysis
-                </Link>
-                <Link
-                  to="/retrieve"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Evidence
-                </Link>
-                <Link
-                  to="/report"
-                  className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors"
-                >
-                  Reports
-                </Link>
+                <Link to="/analyze" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Analysis</Link>
+                <Link to="/retrieve" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Evidence</Link>
+                <Link to="/report" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Reports</Link>
                 <button
                   onClick={handleLogout}
                   className="text-red-400 hover:text-red-600 font-medium text-base transition-colors"
+                  aria-label="Logout"
                 >
                   Logout
                 </button>
@@ -194,16 +175,16 @@ function MainLayout() {
         </div>
       </nav>
 
-      <div className="flex-1 flex flex-col">
+      <main id="main-content" role="main" className="flex-1 flex flex-col">
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/methodology" element={<MethodologyPage />} />
           <Route path="/docs" element={<DocumentationPage />} />
+          <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/login" element={<LoginPage setIsAuthenticated={setIsAuthenticated} />} />
           <Route path="/activate" element={<ActivatePage />} />
-          <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             path="/analyze"
@@ -243,8 +224,9 @@ function MainLayout() {
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </div>
+      </main>
       <Footer />
+      <ChatbotWidget />
     </div>
   );
 }

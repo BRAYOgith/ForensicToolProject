@@ -12,7 +12,9 @@ function ResetPasswordPage() {
     const [loading, setLoading] = useState(false);
 
     const navigate = useNavigate();
-    const API_BASE = 'http://localhost:5000';
+    const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'http://localhost:5000'
+        : 'https://chainforensix-api.onrender.com';
 
     useEffect(() => {
         const t = searchParams.get('token');
@@ -46,6 +48,7 @@ function ResetPasswordPage() {
             const response = await fetch(`${API_BASE}/reset-password`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ token, password }),
             });
 

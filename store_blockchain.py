@@ -38,16 +38,30 @@ logger.info(f"Connecting to: {infura_url}")
 session = requests.Session()
 retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
 session.mount('https://', HTTPAdapter(max_retries=retries))
-web3 = Web3(Web3.HTTPProvider(infura_url, session=session))
-if not web3.is_connected():
-    logger.error("Could not connect to Sepolia testnet")
-    raise Exception("Failed to connect to Sepolia")
 
-logger.info(f"Connected to Sepolia. Chain ID: {web3.eth.chain_id}")
+blockchain_available = False
+web3 = None
+contract = None
+account = None
 
-if not web3.is_address(contract_address):
-    logger.error(f"Invalid contract address: {contract_address}")
-    raise ValueError("Invalid CONTRACT_ADDRESS")
+try:
+    web3 = Web3(Web3.HTTPProvider(infura_url, session=session))
+    if web3.is_connected():
+        logger.info(f"Connected to Sepolia. Chain ID: {web3.eth.chain_id}")
+        
+        if not web3.is_address(contract_address):
+            logger.error(f"Invalid contract address: {contract_address}")
+        else:
+            blockchain_available = True
+            logger.info("Blockchain service is ACTIVE")
+    else:
+        logger.warning("Could not connect to Sepolia testnet. Blockchain features will be DISABLED.")
+except Exception as e:
+    logger.error(f"Blockchain initialization failed: {e}. Blockchain features will be DISABLED.")
+
+# contract_abi is defined below, so contract and account setup must happen after it.
+# This block will be executed only if blockchain_available is True after initial connection check.
+# The actual contract and account setup will be moved after contract_abi definition.
 
 contract_abi = [
     {
@@ -55,7 +69,7 @@ contract_abi = [
         "inputs": [
             {"indexed": True, "internalType": "uint256", "name": "index", "type": "uint256"},
             {"indexed": True, "internalType": "bytes32", "name": "txHash", "type": "bytes32"},
-            {"indexed": True, "internalType": "bool", "name": "isDefamatory", "type": "bool"},
+            {"indexed": False, "internalType": "string", "name": "category", "type": "string"},
             {"indexed": False, "internalType": "uint256", "name": "confidence", "type": "uint256"}
         ],
         "name": "EvidenceStored",
@@ -70,7 +84,9 @@ contract_abi = [
             {"internalType": "string", "name": "investigator", "type": "string"},
             {"internalType": "string", "name": "content", "type": "string"},
             {"internalType": "string", "name": "author_username", "type": "string"},
-            {"internalType": "bool", "name": "isDefamatory", "type": "bool"},
+            {"internalType": "string", "name": "platform", "type": "string"},
+            {"internalType": "string", "name": "category", "type": "string"},
+            {"internalType": "string", "name": "engagementMetrics", "type": "string"},
             {"internalType": "uint256", "name": "confidence", "type": "uint256"}
         ],
         "stateMutability": "view",
@@ -92,8 +108,10 @@ contract_abi = [
             {"internalType": "string", "name": "investigator", "type": "string"},
             {"internalType": "string", "name": "content", "type": "string"},
             {"internalType": "string", "name": "author_username", "type": "string"},
+            {"internalType": "string", "name": "platform", "type": "string"},
+            {"internalType": "string", "name": "category", "type": "string"},
+            {"internalType": "string", "name": "engagementMetrics", "type": "string"},
             {"internalType": "string[]", "name": "mediaUrls", "type": "string[]"},
-            {"internalType": "bool", "name": "isDefamatory", "type": "bool"},
             {"internalType": "uint256", "name": "confidence", "type": "uint256"}
         ],
         "stateMutability": "view",
@@ -109,8 +127,10 @@ contract_abi = [
             {"internalType": "string", "name": "investigator", "type": "string"},
             {"internalType": "string", "name": "content", "type": "string"},
             {"internalType": "string", "name": "author_username", "type": "string"},
+            {"internalType": "string", "name": "platform", "type": "string"},
+            {"internalType": "string", "name": "category", "type": "string"},
+            {"internalType": "string", "name": "engagementMetrics", "type": "string"},
             {"internalType": "string[]", "name": "mediaUrls", "type": "string[]"},
-            {"internalType": "bool", "name": "isDefamatory", "type": "bool"},
             {"internalType": "uint256", "name": "confidence", "type": "uint256"}
         ],
         "stateMutability": "view",
@@ -123,8 +143,10 @@ contract_abi = [
             {"internalType": "string", "name": "_investigator", "type": "string"},
             {"internalType": "string", "name": "_content", "type": "string"},
             {"internalType": "string", "name": "_author_username", "type": "string"},
+            {"internalType": "string", "name": "_platform", "type": "string"},
+            {"internalType": "string", "name": "_category", "type": "string"},
+            {"internalType": "string", "name": "_engagementMetrics", "type": "string"},
             {"internalType": "string[]", "name": "_mediaUrls", "type": "string[]"},
-            {"internalType": "bool", "name": "_isDefamatory", "type": "bool"},
             {"internalType": "uint256", "name": "_confidence", "type": "uint256"}
         ],
         "name": "storeEvidence",
@@ -141,21 +163,26 @@ contract_abi = [
     }
 ]
 
-contract = web3.eth.contract(
-    address=web3.to_checksum_address(contract_address),
-    abi=contract_abi
-)
-
-account = web3.eth.account.from_key(private_key)
-if account.address.lower() != wallet_address.lower():
-    logger.error("Private key does not match WALLET_ADDRESS")
-    raise ValueError("Private key does not match WALLET_ADDRESS")
-web3.eth.default_account = account.address
-logger.info(f"Using account: {account.address}")
+if blockchain_available:
+    try:
+        contract = web3.eth.contract(
+            address=web3.to_checksum_address(contract_address),
+            abi=contract_abi
+        )
+        account = web3.eth.account.from_key(private_key)
+        if account.address.lower() != wallet_address.lower():
+            logger.error("Private key does not match WALLET_ADDRESS")
+            blockchain_available = False
+        else:
+            web3.eth.default_account = account.address
+            logger.info(f"Using account: {account.address}")
+    except Exception as e:
+        logger.error(f"Contract/Account setup failed: {e}")
+        blockchain_available = False
 
 def generate_evidence_hash(content, author_username, post_id, timestamp):
     try:
-        if not all([content, author_username, post_id, timestamp]):
+        if not all([content, author_username, str(post_id), timestamp]):
             logger.error("Missing fields for hash generation")
             raise ValueError("All fields required")
         data_string = f"{content}{author_username}{str(post_id)}{timestamp}"
@@ -166,6 +193,10 @@ def generate_evidence_hash(content, author_username, post_id, timestamp):
         return None
 
 def store_evidence(evidence_data):
+    if not blockchain_available:
+        logger.error("store_evidence failed: Blockchain service is unavailable.")
+        return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None, "error": "Blockchain service unavailable"}
+    
     try:
         if isinstance(evidence_data, str):
             evidence = json.loads(evidence_data)
@@ -178,20 +209,22 @@ def store_evidence(evidence_data):
 
         content = evidence.get("content", "")
         author_username = evidence.get("author_username", "")
-        # Handle both 'id' and 'hash' as the post ID from different callers
         post_id = evidence.get("id") or evidence.get("hash", "")
         timestamp = evidence.get("timestamp", "")
         investigator = evidence.get("investigator", "")
         media_urls = evidence.get("mediaUrls", [])
-
+        platform = evidence.get("platform", "Unknown")
+        
         # Extract AI defamation results
         defamation = evidence.get("defamation", {})
-        is_defamatory = defamation.get("is_defamatory", False)
+        category = defamation.get("category", "Safe")
         confidence_score = defamation.get("confidence", 0.0)
-        # Scale confidence score for storage as uint256 (e.g. 0.94 → 9400)
         scaled_confidence = int(confidence_score * 10000)
 
-        # Ensure media_urls is always a list
+        # Engagement metrics
+        engagement = evidence.get("engagement", {})
+        engagement_json = json.dumps(engagement)
+
         if not isinstance(media_urls, list):
             media_urls = []
 
@@ -201,42 +234,38 @@ def store_evidence(evidence_data):
             return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
 
         if not all([hash_value, timestamp, investigator]):
-            logger.error(
-                f"Missing required fields - hash: {bool(hash_value)}, "
-                f"timestamp: {bool(timestamp)}, investigator: {bool(investigator)}, "
-                f"post_id: {bool(post_id)}"
-            )
+            logger.error(f"Missing required fields - hash: {bool(hash_value)}, timestamp: {bool(timestamp)}, investigator: {bool(investigator)}")
             return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
-
-        # Force empty array as [] for ABI encoding
-        media_urls = media_urls if media_urls else []
 
         try:
             gas_estimate = contract.functions.storeEvidence(
-                hash_value,  # Passes as string now
+                hash_value,
                 timestamp,
                 investigator,
                 content,
                 author_username,
+                platform,
+                category,
+                engagement_json,
                 media_urls,
-                is_defamatory,
                 scaled_confidence
             ).estimate_gas({"from": account.address})
             gas_limit = int(gas_estimate * 1.5)
-            logger.info(f"Estimated gas: {gas_estimate}, using safe limit: {gas_limit}")
         except Exception as gas_err:
-            logger.warning(f"Gas estimation failed: {gas_err}. Using high fallback.")
-            gas_limit = 1000000  # More reasonable fallback
+            logger.warning(f"Gas estimation failed: {gas_err}")
+            gas_limit = 1500000
 
         nonce = web3.eth.get_transaction_count(account.address, 'pending')
         tx = contract.functions.storeEvidence(
-            hash_value,  # Passes as string now
+            hash_value,
             timestamp,
             investigator,
             content,
             author_username,
+            platform,
+            category,
+            engagement_json,
             media_urls,
-            is_defamatory,
             scaled_confidence
         ).build_transaction({
             "from": account.address,
@@ -248,45 +277,24 @@ def store_evidence(evidence_data):
 
         signed_tx = web3.eth.account.sign_transaction(tx, private_key)
         eth_tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        logger.info(f"Sent tx: {eth_tx_hash.hex()}")
-
         receipt = web3.eth.wait_for_transaction_receipt(eth_tx_hash, timeout=300)
+        
         if receipt.status == 0:
-            logger.error("Transaction reverted (status 0)")
-            # Optional: Try to simulate call to get revert reason
-            try:
-                web3.eth.call(tx, block_identifier=receipt.blockNumber)
-            except Exception as revert_err:
-                logger.error(f"Revert reason simulation: {revert_err}")
-            
-            final_revert_hash = eth_tx_hash.hex()
-            if not final_revert_hash.startswith("0x"):
-                final_revert_hash = f"0x{final_revert_hash}"
-                
-            return {"receipt": receipt, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": final_revert_hash}
+            return {"receipt": receipt, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": eth_tx_hash.hex()}
 
         try:
             events = contract.events.EvidenceStored().process_receipt(receipt)
             if events:
                 evidence_id = events[0]["args"]["index"]
-                # Ensure hashes are returned with 0x prefix for proper UI linking
                 event_tx_hash = events[0]["args"]["txHash"].hex()
                 if not event_tx_hash.startswith("0x"):
                     event_tx_hash = f"0x{event_tx_hash}"
-                
-                final_eth_tx_hash = eth_tx_hash.hex()
-                if not final_eth_tx_hash.startswith("0x"):
-                    final_eth_tx_hash = f"0x{final_eth_tx_hash}"
-                    
-                logger.info(f"Success - Evidence ID: {evidence_id}")
                 return {
                     "receipt": receipt,
                     "evidence_id": evidence_id,
                     "tx_hash": event_tx_hash,
-                    "eth_tx_hash": final_eth_tx_hash
+                    "eth_tx_hash": eth_tx_hash.hex()
                 }
-            else:
-                logger.warning("No EvidenceStored event despite success")
         except Exception as e:
             logger.error(f"Event parsing error: {e}")
 
@@ -297,9 +305,9 @@ def store_evidence(evidence_data):
         return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
 
 def get_evidence(index):
+    if not blockchain_available:
+        return None
     try:
-        if index < 0:
-            return None
         res = contract.functions.getEvidence(index).call()
         if res and res[0]:
             return {
@@ -308,11 +316,11 @@ def get_evidence(index):
                 "investigator": res[2],
                 "content": res[3],
                 "author_username": res[4],
-                "mediaUrls": res[5],
-                "defamation": {
-                    "is_defamatory": res[6],
-                    "confidence": res[7] / 10000.0
-                }
+                "platform": res[5],
+                "category": res[6],
+                "engagement": json.loads(res[7]),
+                "mediaUrls": res[8],
+                "confidence": res[9] / 10000.0
             }
         return None
     except Exception as e:
@@ -320,6 +328,8 @@ def get_evidence(index):
         return None
 
 def get_evidence_by_tx_hash(tx_hash):
+    if not blockchain_available:
+        return None
     try:
         if not tx_hash or not tx_hash.startswith('0x') or len(tx_hash) != 66:
             return None
@@ -333,11 +343,11 @@ def get_evidence_by_tx_hash(tx_hash):
                 "investigator": res[3],
                 "content": res[4],
                 "author_username": res[5],
-                "mediaUrls": res[6],
-                "defamation": {
-                    "is_defamatory": res[7],
-                    "confidence": res[8] / 10000.0
-                }
+                "platform": res[6],
+                "category": res[7],
+                "engagement": json.loads(res[8]),
+                "mediaUrls": res[9],
+                "confidence": res[10] / 10000.0
             }
         return None
     except Exception as e:
