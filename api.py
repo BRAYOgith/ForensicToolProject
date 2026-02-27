@@ -99,10 +99,13 @@ limiter = Limiter(
 
 MODEL_PATH = "models/afro_xlmr_forensics"
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if STRICT_FORENSIC_READY else None
+device = None
+tokenizer = None
+model = None
 
 try:
     if STRICT_FORENSIC_READY:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
         tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
         model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
@@ -111,9 +114,6 @@ try:
         logger.info(f"Forensic model loaded on {device}")
     else:
         logger.info("Skipping local model load - heavy dependencies missing.")
-except Exception as e:
-    logger.warning(f"Forensic model not loaded: {e}")
-    logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
 except Exception as e:
     logger.warning(f"Forensic model not loaded: {e}")
     logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
