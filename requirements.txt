@@ -63,7 +63,8 @@ requests==2.32.3
 rlp==4.1.0
 setuptools==80.9.0
 six==1.17.0
-soupsieveieve==2.7
+soupsieve==2.7
+sympy==1.14.0
 threadpoolctl==3.6.0
 tinycss2==1.4.0
 tinyhtml5==2.0.0
