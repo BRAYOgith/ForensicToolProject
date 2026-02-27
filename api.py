@@ -169,7 +169,8 @@ def extract_forensic_markers(text):
 
 def clean_for_ai(text):
     # Convert real emojis to text (Matches training pipeline)
-    text = emoji.demojize(text)
+    if emoji:
+        text = emoji.demojize(text)
     # Standardize handles
     text = re.sub(r'@\w+', '@user', text)
     # Remove URLs
