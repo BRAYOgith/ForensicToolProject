@@ -114,26 +114,6 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-MODEL_PATH = "models/afro_xlmr_forensics"
-
-tokenizer = None
-model = None
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-try:
-    logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-    model.to(device)
-    model.eval()
-    logger.info(f"Forensic model loaded on {device}")
-except Exception as e:
-    logger.warning(f"Forensic model not loaded: {e}")
-    logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
-except Exception as e:
-    logger.warning(f"Forensic model not loaded: {e}")
-    logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
-
 # Forensic Lexicons for Personalization
 NCIC_LEXICON = [
     "Hatupangwingwi", "Mende", "Chunga Kura", "Kama noma noma", 
