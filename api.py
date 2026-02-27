@@ -49,8 +49,9 @@ try:
 except Exception:
     ocr_reader = None
 
-device = torch.device("cuda" if torch is not None and torch.cuda.is_available() else "cpu")
+device = None
 if HAS_LOCAL_AI:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     try:
         MODEL_PATH = "models/afro_xlmr_forensics"
         if os.path.exists(MODEL_PATH):
