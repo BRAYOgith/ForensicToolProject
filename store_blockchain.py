@@ -39,25 +39,34 @@ session = requests.Session()
 retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
 session.mount('https://', HTTPAdapter(max_retries=retries))
 
-blockchain_available = False
+def init_blockchain():
+    global web3, contract, account, blockchain_available
+    if blockchain_available and web3:
+        return True
+        
+    try:
+        # Check environment variables here or globally? 
+        # They are already checked at the top, which is fine since it's just os.getenv.
+        
+        # Use a short timeout for the initial connection check
+        web3 = Web3(Web3.HTTPProvider(infura_url, session=session, request_kwargs={'timeout': 5}))
+        if web3.is_connected():
+            logger.info(f"Connected to Sepolia. Chain ID: {web3.eth.chain_id}")
+            if web3.is_address(contract_address):
+                # We need contract_abi defined before we can finish this.
+                # For now, we just mark that the connection is possible.
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"Blockchain connection check failed: {e}")
+        return False
+
+# Connection check is now deferred to where it's actually needed 
+# or initialized once during first call.
+blockchain_available = False # Will be updated by init function
 web3 = None
 contract = None
 account = None
-
-try:
-    web3 = Web3(Web3.HTTPProvider(infura_url, session=session))
-    if web3.is_connected():
-        logger.info(f"Connected to Sepolia. Chain ID: {web3.eth.chain_id}")
-        
-        if not web3.is_address(contract_address):
-            logger.error(f"Invalid contract address: {contract_address}")
-        else:
-            blockchain_available = True
-            logger.info("Blockchain service is ACTIVE")
-    else:
-        logger.warning("Could not connect to Sepolia testnet. Blockchain features will be DISABLED.")
-except Exception as e:
-    logger.error(f"Blockchain initialization failed: {e}. Blockchain features will be DISABLED.")
 
 # contract_abi is defined below, so contract and account setup must happen after it.
 # This block will be executed only if blockchain_available is True after initial connection check.
@@ -163,22 +172,41 @@ contract_abi = [
     }
 ]
 
-if blockchain_available:
+def init_blockchain():
+    global web3, contract, account, blockchain_available
+    if blockchain_available and web3 and contract:
+        return True
+        
     try:
-        contract = web3.eth.contract(
-            address=web3.to_checksum_address(contract_address),
-            abi=contract_abi
-        )
-        account = web3.eth.account.from_key(private_key)
-        if account.address.lower() != wallet_address.lower():
-            logger.error("Private key does not match WALLET_ADDRESS")
-            blockchain_available = False
-        else:
-            web3.eth.default_account = account.address
-            logger.info(f"Using account: {account.address}")
+        # Check environment variables
+        if not all([infura_project_id, private_key, contract_address, wallet_address]):
+            logger.error("Blockchain initialization failed: Missing environment variables")
+            return False
+
+        # Use a short timeout for the initial connection check
+        infura_url_final = infura_project_id if infura_project_id.startswith("http") else f"https://sepolia.infura.io/v3/{infura_project_id}"
+        web3 = Web3(Web3.HTTPProvider(infura_url_final, session=session, request_kwargs={'timeout': 5}))
+        
+        if web3.is_connected():
+            logger.info(f"Connected to Sepolia. Chain ID: {web3.eth.chain_id}")
+            if web3.is_address(contract_address):
+                contract = web3.eth.contract(
+                    address=web3.to_checksum_address(contract_address),
+                    abi=contract_abi
+                )
+                account = web3.eth.account.from_key(private_key)
+                if account.address.lower() != wallet_address.lower():
+                    logger.error("Private key does not match WALLET_ADDRESS")
+                    return False
+                
+                web3.eth.default_account = account.address
+                blockchain_available = True
+                logger.info(f"Blockchain service is ACTIVE. Account: {account.address}")
+                return True
+        return False
     except Exception as e:
-        logger.error(f"Contract/Account setup failed: {e}")
-        blockchain_available = False
+        logger.error(f"Blockchain initialization failed: {e}")
+        return False
 
 def generate_evidence_hash(content, author_username, post_id, timestamp):
     try:
@@ -193,7 +221,7 @@ def generate_evidence_hash(content, author_username, post_id, timestamp):
         return None
 
 def store_evidence(evidence_data):
-    if not blockchain_available:
+    if not init_blockchain():
         logger.error("store_evidence failed: Blockchain service is unavailable.")
         return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None, "error": "Blockchain service unavailable"}
     
@@ -305,7 +333,7 @@ def store_evidence(evidence_data):
         return {"receipt": None, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": None}
 
 def get_evidence(index):
-    if not blockchain_available:
+    if not init_blockchain():
         return None
     try:
         res = contract.functions.getEvidence(index).call()
@@ -328,7 +356,7 @@ def get_evidence(index):
         return None
 
 def get_evidence_by_tx_hash(tx_hash):
-    if not blockchain_available:
+    if not init_blockchain():
         return None
     try:
         if not tx_hash or not tx_hash.startswith('0x') or len(tx_hash) != 66:
