@@ -5,6 +5,7 @@ import re
 import sqlite3
 import jwt
 import datetime
+import time
 import requests
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
@@ -197,21 +198,79 @@ def process_visual_content(media_urls):
     }
 
 
-def predict_defamatory(text):
-    if not tokenizer or not model:
-        return {"is_defamatory": False, "category": "None", "confidence": 0.0}
+def query_hf_api(payload):
+    """
+    Query the Hugging Face Inference API with retry logic for model loading.
+    """
+    repo_id = os.getenv("HF_REPO_ID", "BRAYOgith/afro-xlmr-forensics")
+    api_url = f"https://api-inference.huggingface.co/models/{repo_id}"
+    token = os.getenv("HF_API_TOKEN")
+    
+    if not token:
+        logger.error("Missing HF_API_TOKEN for production inference")
+        return None
 
-    # Clean text to match model training format
-    cleaned_text = clean_for_ai(text)
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    for attempt in range(3):
+        try:
+            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 503:
+                # Model is loading
+                estimated_time = response.json().get('estimated_time', 20)
+                logger.info(f"HF Model loading... attempt {attempt+1}, waiting {estimated_time}s")
+                time.sleep(min(estimated_time, 20))
+            else:
+                logger.error(f"HF API Error {response.status_code}: {response.text}")
+                return None
+        except Exception as e:
+            logger.error(f"HF API Request failed: {e}")
+            time.sleep(2)
+            
+    return None
+
+def predict_defamatory(text):
+    # Determine if we should use HF API (Production) or Local Model (Development)
+    use_hf = os.getenv("USE_HF_API", "false").lower() == "true"
+    
+    if use_hf:
+        logger.info("Using Hugging Face Inference API for analysis")
+        results = query_hf_api({"inputs": clean_for_ai(text)})
+        
+        if results and isinstance(results, list) and len(results) > 0:
+            # Handle list of results (probabilities for each class)
+            # HF format: [[{'label': 'LABEL_0', 'score': 0.9}, ...]]
+            inner_results = results[0] if isinstance(results[0], list) else results
+            confidences = [0.0, 0.0, 0.0]
+            for res in inner_results:
+                label = res['label']
+                score = res['score']
+                if label == 'LABEL_0': confidences[0] = score
+                elif label == 'LABEL_1': confidences[1] = score
+                elif label == 'LABEL_2': confidences[2] = score
+        else:
+            logger.warning("HF API failed or returned empty - falling back to local/default")
+            return {"is_defamatory": False, "category": "Analysis Failure", "confidence": 0.0, "justification": "Model inference failed."}
+    else:
+        if not tokenizer or not model:
+            return {"is_defamatory": False, "category": "None", "confidence": 0.0}
+        
+        # Clean text to match model training format
+        cleaned_text = clean_for_ai(text)
+
+        try:
+            inputs = tokenizer(cleaned_text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
+            with torch.no_grad():
+                outputs = model(**inputs)
+                prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
+                confidences = prob[0].tolist()
+        except Exception as e:
+            logger.error(f"Local Inference Failure: {e}")
+            return {"is_defamatory": False, "category": "Error", "confidence": 0.0}
 
     try:
-        inputs = tokenizer(cleaned_text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
-            
-            # Map classes: 0=Safe, 1=Defamatory, 2=Hate Speech
-            confidences = prob[0].tolist()
         categories = ["Safe", "Defamatory", "Hate Speech"]
         
         # --- OPTIMIZED FORENSIC THRESHOLDS ---
