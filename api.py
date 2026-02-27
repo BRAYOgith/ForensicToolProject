@@ -22,47 +22,63 @@ from store_blockchain import (
     store_evidence, get_evidence, get_evidence_by_tx_hash, generate_evidence_hash
 )
 
+import hashlib
+import time
+from crypto_utils import encrypt_field, decrypt_field
+
+# Heavy dependencies - wrapped for clean production startup
 try:
-    logger.info("Attempting to import easyocr...")
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    import torch
+    import emoji
+    HAS_LOCAL_AI = True
+except ImportError:
+    tokenizer = None
+    model = None
+    torch = None
+    emoji = None
+    HAS_LOCAL_AI = False
+
+try:
     import easyocr
     # Initialize reader once at startup with English and Swahili support
     # Note: This may take several minutes on first run to download models
     logger.info("Initializing EasyOCR reader (en, sw) on CPU...")
     ocr_reader = easyocr.Reader(['en', 'sw'], gpu=False) 
     logger.info("EasyOCR initialized successfully")
-except ImportError:
-    logger.warning("EasyOCR not found. OCR functionality will be disabled. Run pip install easyocr.")
-    ocr_reader = None
-except Exception as e:
-    logger.error(f"EasyOCR initialization failed: {e}", exc_info=True)
+except Exception:
     ocr_reader = None
 
-logger.info("Proceeding with remaining imports...")
-
-import pdfkit
-from functools import wraps
-from datetime import timedelta
-from bcrypt import gensalt, hashpw, checkpw
-import hashlib
-import time
-from crypto_utils import encrypt_field, decrypt_field
-
-# Heavy dependencies for local inference - wrapped for clean production startup
-try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-    import torch
-    import emoji
-    STRICT_FORENSIC_READY = True
-except ImportError:
-    logger.warning("Heavy dependencies (transformers, torch, emoji) not found. Local model inference will be disabled.")
-    STRICT_FORENSIC_READY = False
+device = torch.device("cuda" if torch is not None and torch.cuda.is_available() else "cpu")
+if HAS_LOCAL_AI:
+    try:
+        MODEL_PATH = "models/afro_xlmr_forensics"
+        if os.path.exists(MODEL_PATH):
+            tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+            model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH).to(device)
+            model.eval()
+            logger.info("Forensic model loaded successfully")
+        else:
+            logger.warning(f"Model path {MODEL_PATH} not found. Local inference disabled.")
+            model = None
+    except Exception as e:
+        logger.error(f"Local model loading failed: {e}")
+        model = None
 
 app = Flask(__name__)
 
-allowed_origins = ["https://forensic-tool-project.vercel.app"]
-# In development, allow both localhost and 127.0.0.1
+allowed_origins = [
+    "https://forensic-tool-project.vercel.app",
+    "https://forensictoolproject.onrender.com"
+]
+# In development, allow both localhost and 127.0.0.1 on common ports
 if os.getenv("FLASK_ENV") == "development" or not os.getenv("FLASK_ENV"):
-    allowed_origins.extend(["https://forensic-tool-project.vercel.app", "http://127.0.0.1:3000"])
+    allowed_origins.extend([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000"
+    ])
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 @app.after_request
@@ -99,21 +115,17 @@ limiter = Limiter(
 
 MODEL_PATH = "models/afro_xlmr_forensics"
 
-device = None
 tokenizer = None
 model = None
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
-    if STRICT_FORENSIC_READY:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-        model.to(device)
-        model.eval()
-        logger.info(f"Forensic model loaded on {device}")
-    else:
-        logger.info("Skipping local model load - heavy dependencies missing.")
+    logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+    model.to(device)
+    model.eval()
+    logger.info(f"Forensic model loaded on {device}")
 except Exception as e:
     logger.warning(f"Forensic model not loaded: {e}")
     logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
@@ -175,8 +187,7 @@ def extract_forensic_markers(text):
 
 def clean_for_ai(text):
     # Convert real emojis to text (Matches training pipeline)
-    if STRICT_FORENSIC_READY:
-        text = emoji.demojize(text)
+    text = emoji.demojize(text)
     # Standardize handles
     text = re.sub(r'@\w+', '@user', text)
     # Remove URLs
@@ -213,181 +224,102 @@ def process_visual_content(media_urls):
     }
 
 
-def query_hf_api(payload):
-    """
-    Query the Hugging Face Inference API with retry logic for model loading.
-    """
-    repo_id = os.getenv("HF_REPO_ID", "BRAYOgith/afro-xlmr-forensics")
-    api_url = f"https://api-inference.huggingface.co/models/{repo_id}"
-    token = os.getenv("HF_API_TOKEN")
-    
-    if not token:
-        logger.error("Missing HF_API_TOKEN for production inference")
-        return None
-
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    for attempt in range(3):
-        try:
-            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-            if response.status_code == 200:
-                return response.json()
-            elif response.status_code == 503:
-                # Model is loading
-                estimated_time = response.json().get('estimated_time', 20)
-                logger.info(f"HF Model loading... attempt {attempt+1}, waiting {estimated_time}s")
-                time.sleep(min(estimated_time, 20))
-            else:
-                logger.error(f"HF API Error {response.status_code}: {response.text}")
-                return None
-        except Exception as e:
-            logger.error(f"HF API Request failed: {e}")
-            time.sleep(2)
-            
-    return None
-
 def predict_defamatory(text):
-    # Determine if we should use HF API (Production) or Local Model (Development)
-    # Default to TRUE if Render environment is detected or if USE_HF_API is set
-    use_hf = os.getenv("USE_HF_API", "true").lower() == "true"
-    
-    if use_hf:
-        logger.info("Using Hugging Face Inference API for analysis")
-        results = query_hf_api({"inputs": clean_for_ai(text)})
-        
-        if results and isinstance(results, list) and len(results) > 0:
-            # Handle list of results (probabilities for each class)
-            # HF format: [[{'label': 'LABEL_0', 'score': 0.9}, ...]]
-            inner_results = results[0] if isinstance(results[0], list) else results
-            confidences = [0.0, 0.0, 0.0]
-            for res in inner_results:
-                label = res['label']
-                score = res['score']
-                if label == 'LABEL_0': confidences[0] = score
-                elif label == 'LABEL_1': confidences[1] = score
-                elif label == 'LABEL_2': confidences[2] = score
-        else:
-            logger.warning("HF API failed or returned empty - falling back to local/default")
-            return {"is_defamatory": False, "category": "Analysis Failure", "confidence": 0.0, "justification": "Model inference failed."}
-    else:
-        if not STRICT_FORENSIC_READY or not tokenizer or not model:
-            return {"is_defamatory": False, "category": "None", "confidence": 0.0}
-        
-        # Clean text to match model training format
-        cleaned_text = clean_for_ai(text)
+    # Determine if we should use HF API (Always in Prod if local libs missing or explicitly requested)
+    is_prod = os.getenv("FLASK_ENV") == "production"
+    use_hf = is_prod or not HAS_LOCAL_AI or os.getenv("USE_HF_API") == "true" or model is None
 
+    confidences = [0.0, 0.0, 0.0]
+    if use_hf:
+        logger.info("Running inference via Hugging Face API...")
         try:
+            API_URL = "https://api-inference.huggingface.co/models/BrianNj/afro-xlmr-forensics"
+            # Try specific token, then generic token, then none
+            hf_token = os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN')
+            headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+            
+            payload = {"inputs": text, "options": {"wait_for_model": True}}
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=20)
+            
+            if response.status_code == 200:
+                output = response.json()
+                # Afro-XLMR typically returns a list of label/score dicts
+                # Label mapping: LABEL_0=Safe, LABEL_1=Defamatory, LABEL_2=Hate Speech
+                inner = output[0] if isinstance(output, list) and isinstance(output[0], list) else output
+                if isinstance(inner, list):
+                    for item in inner:
+                        label_idx = int(item['label'].split('_')[-1])
+                        if label_idx < 3:
+                            confidences[label_idx] = item['score']
+                else:
+                    logger.error(f"Unexpected HF API output format: {output}")
+                    return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Unexpected analysis result format."}
+            else:
+                logger.error(f"HF API Error ({response.status_code}): {response.text}")
+                return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Inference API currently unavailable."}
+        except Exception as e:
+            logger.error(f"HF API Failed: {e}")
+            return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Network error during analysis."}
+    else:
+        # Local Inference
+        try:
+            cleaned_text = clean_for_ai(text)
             inputs = tokenizer(cleaned_text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
             with torch.no_grad():
                 outputs = model(**inputs)
                 prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
                 confidences = prob[0].tolist()
         except Exception as e:
-            logger.error(f"Local Inference Failure: {e}")
-            return {"is_defamatory": False, "category": "Error", "confidence": 0.0}
+            logger.error(f"Local Inference Failed: {e}")
+            return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Local model execution failed."}
 
-    try:
-        categories = ["Safe", "Defamatory", "Hate Speech"]
+    # Common Logic for Verdict and Justification
+    categories = ["Safe", "Defamatory", "Hate Speech"]
+    HATE_THRESHOLD = 0.45
+    DEFAM_THRESHOLD = 0.25
+    
+    if confidences[2] > HATE_THRESHOLD:
+        top_class = 2
+    elif confidences[1] > DEFAM_THRESHOLD:
+        top_class = 1
+    else:
+        top_class = 0
         
-        # --- OPTIMIZED FORENSIC THRESHOLDS ---
-        # Based on local balanced tuning for high-sensitivity forensic triage
-        HATE_THRESHOLD = 0.45
-        DEFAM_THRESHOLD = 0.25
+    result_category = categories[top_class]
+    flag = top_class > 0
+    markers = extract_forensic_markers(text)
+    
+    def generate_granular_justification(cat, score):
+        cat_lower = cat.lower().replace(" ", "_")
+        subjects = f" targeting {', '.join(markers['entities'] + markers['names'])}" if (markers['entities'] or markers['names']) else ""
         
-        # Priority 1: Hate Speech
-        if confidences[2] > HATE_THRESHOLD:
-            top_class = 2
-        # Priority 2: Defamatory (if not Hate Speech)
-        elif confidences[1] > DEFAM_THRESHOLD:
-            top_class = 1
-        # Default: Safe
-        else:
-            top_class = 0
-            
-        result_category = categories[top_class]
-        flag = top_class > 0 # Flag if not Safe
-        
-        # Forensic Extraction
-        markers = extract_forensic_markers(text)
-        
-        def generate_granular_justification(cat, score):
-            cat_lower = cat.lower().replace(" ", "_")
-            
-            # --- Personalization Logic ---
-            subjects = f" targeting {', '.join(markers['entities'] + markers['names'])}" if (markers['entities'] or markers['names']) else ""
-            
-            if cat_lower == "hate_speech":
-                if score > 0.40:
-                    specifics = f" Critical markers found: {', '.join(markers['ncic'] + markers['security'])}." if (markers['ncic'] or markers['security']) else ""
-                    return f"This score indicates a high probability of ethnic incitement or prohibited speech patterns.{specifics}{subjects}"
-                elif score > 0.05:
-                    return f"Low-level markers of inflammatory language detected, but insufficient to reach the legal threshold for hate speech."
-                else:
-                    return f"Negligible probability. No monitored ethnic slurs or incitement patterns detected."
-            
-            elif cat_lower == "defamatory":
-                if score > 0.35:
-                    specifics = f" Markers identified: {', '.join(markers['defamatory'])}." if markers['defamatory'] else ""
-                    return f"High probability of character assassination or reputational harm.{specifics}{subjects}"
-                elif score > 0.10:
-                    return f"Suggestive of negative sentiment{subjects}, but lacks the definitive markers for a high-confidence defamatory flag."
-                else:
-                    return f"Normal commentary pattern. No patterns of targeted reputational harm detected."
-            
-            else: # Safe
-                if score > 0.50:
-                    signifiers = f" Semantic signifiers: {', '.join(markers['safe'])}." if markers['safe'] else ""
-                    return f"Content reflects standard social discourse or objective reporting.{signifiers}"
-                else:
-                    return f"Analysis suggests standard content, though some semantic ambiguities were processed."
+        if cat_lower == "hate_speech":
+            if score > 0.40:
+                specifics = f" Critical markers: {', '.join(markers['ncic'] + markers['security'])}." if (markers['ncic'] or markers['security']) else ""
+                return f"High probability of incitement or prohibited speech patterns.{specifics}{subjects}"
+            return "Low-level discourse markers, below legal threshold."
+        elif cat_lower == "defamatory":
+            if score > 0.35:
+                specifics = f" Markers: {', '.join(markers['defamatory'])}." if markers['defamatory'] else ""
+                return f"High probability of reputational harm.{specifics}{subjects}"
+            return "Suggestive sentiment, lacks definitive defamatory markers."
+        return "Standard social discourse or objective reporting."
 
-        # Compute justifications for ALL categories
-        all_justifications = {
-            "safe": generate_granular_justification("Safe", confidences[0]),
-            "defamatory": generate_granular_justification("Defamatory", confidences[1]),
-            "hate_speech": generate_granular_justification("Hate Speech", confidences[2])
-        }
+    all_justifications = {
+        "safe": generate_granular_justification("Safe", confidences[0]),
+        "defamatory": generate_granular_justification("Defamatory", confidences[1]),
+        "hate_speech": generate_granular_justification("Hate Speech", confidences[2])
+    }
 
-        top_justification = all_justifications[result_category.lower().replace(" ", "_")]
-        return {
-            "is_defamatory": flag,
-            "category": result_category,
-            "confidence": confidences[top_class],
-            "justification": top_justification,
-            "all_scores": {
-                "safe": confidences[0],
-                "defamatory": confidences[1],
-                "hate_speech": confidences[2]
-            },
-            "all_justifications": all_justifications,
-            "technical_justification": f"Processed via Afro-XLMR (N={len(text)} chars). Markers: {sum(len(v) for v in markers.values())}."
-        }
-    except Exception as e:
-        logger.error(f"Inference Failure: {e}")
-        return {"is_defamatory": False, "category": "Safe", "confidence": 0.0, "justification": "Error during analysis fallback applied.", "all_scores": {"safe": 1.0, "defamatory": 0.0, "hate_speech": 0.0}}
-        
-        # Technical Justification for the Forensic Log
-        tech_note = f"Afro-XLMR semantic vectors analyzed. "
-        if markers['security']: tech_note += f"Security/Threat lexicon match: {', '.join(markers['security'])}. "
-        if markers['hashtags']: tech_note += f"Monitored hashtags: {', '.join(markers['hashtags'])}. "
-        if ":" in cleaned_text: tech_note += "Visual toxicity (emojis) transcribed. "
-
-        return {
-            "is_defamatory": flag, 
-            "category": result_category,
-            "confidence": round(confidences[top_class], 4),
-            "justification": top_justification,
-            "technical_justification": tech_note,
-            "all_scores": {
-                "safe": round(confidences[0], 4),
-                "defamatory": round(confidences[1], 4),
-                "hate_speech": round(confidences[2], 4)
-            },
-            "all_justifications": all_justifications
-        }
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "System error during analysis."}
+    return {
+        "is_defamatory": flag,
+        "category": result_category,
+        "confidence": confidences[top_class],
+        "justification": all_justifications[result_category.lower().replace(" ", "_")],
+        "all_scores": {"safe": confidences[0], "defamatory": confidences[1], "hate_speech": confidences[2]},
+        "all_justifications": all_justifications,
+        "technical_justification": f"{'HF-Cloud' if use_hf else 'Local-AfroXLMR'} analyzed {len(text)} chars. Markers: {sum(len(v) for v in markers.values())}."
+    }
 
 bearer_token = os.getenv("X_BEARER_TOKEN")
 if not bearer_token:

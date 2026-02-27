@@ -18,7 +18,7 @@ import './index.css';
 
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
   ? 'http://localhost:5000'
-  : 'https://forensictoolproject.onrender.com'; // Replace with your production URL
+  : 'https://forensictoolproject.onrender.com';
 
 function ActivatePage() {
   const [searchParams] = useSearchParams();

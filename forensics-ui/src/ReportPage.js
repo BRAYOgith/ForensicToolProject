@@ -36,7 +36,9 @@ function ReportPage() {
   const [loading, setLoading] = useState(true);
 
   const navigate = useNavigate();
-  const API_BASE = 'https://forensictoolproject.onrender.com';
+  const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000'
+    : 'https://forensictoolproject.onrender.com';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -112,10 +114,10 @@ function ReportPage() {
     }
   };
 
- 
+
   const totalFetched = reportData?.fetched.length || 0;
   const defamatoryCount = reportData?.fetched.filter(item => {
-    return false; 
+    return false;
   }).length || 0;
   const defamationRate = totalFetched > 0 ? (defamatoryCount / totalFetched) * 100 : 0;
 

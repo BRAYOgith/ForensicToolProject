@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? 'http://localhost:5000'
-    : 'https://chainforensix-api.onrender.com';
+    : 'https://forensictoolproject.onrender.com';
 
 // Simple markdown-like rendering for bot messages
 function renderBotText(text) {
