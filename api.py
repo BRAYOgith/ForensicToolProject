@@ -5,13 +5,14 @@ import json
 import re
 import sqlite3
 import jwt
-import datetime
+from datetime import datetime, timedelta
 import requests
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
+from bcrypt import hashpw, checkpw, gensalt
 
 # Initialize Logging first
 logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')
@@ -588,7 +589,7 @@ def register():
         conn.commit()
         activation_token = jwt.encode({
             'user_id': user_id,
-            'exp': datetime.datetime.utcnow() + timedelta(hours=1)
+            'exp': datetime.utcnow() + timedelta(hours=1)
         }, app.config['SECRET_KEY'])
         send_forensic_email(email, activation_token, email_type="activation")
         conn.close()
@@ -667,7 +668,7 @@ def resend_activation():
 
     token = jwt.encode({
         'user_id': user[0],
-        'exp': datetime.datetime.utcnow() + timedelta(hours=1)
+        'exp': datetime.utcnow() + timedelta(hours=1)
     }, app.config['SECRET_KEY'])
 
     send_forensic_email(email, token, email_type="activation")
@@ -694,7 +695,7 @@ def forgot_password():
     reset_token = jwt.encode({
         'user_id': user[0],
         'action': 'password_reset',
-        'exp': datetime.datetime.utcnow() + timedelta(hours=1)
+        'exp': datetime.utcnow() + timedelta(hours=1)
     }, app.config['SECRET_KEY'])
 
     send_forensic_email(email, reset_token, email_type="reset")
@@ -779,7 +780,7 @@ def login():
 
     token = jwt.encode({
         'user_id': user[0],
-        'exp': datetime.datetime.utcnow() + timedelta(hours=24)
+        'exp': datetime.utcnow() + timedelta(hours=24)
     }, app.config['SECRET_KEY'])
 
     log_audit(user[0], "login_success", "User logged in")
