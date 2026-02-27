@@ -117,6 +117,9 @@ try:
 except Exception as e:
     logger.warning(f"Forensic model not loaded: {e}")
     logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
+except Exception as e:
+    logger.warning(f"Forensic model not loaded: {e}")
+    logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
 
 # Forensic Lexicons for Personalization
 NCIC_LEXICON = [
