@@ -21,7 +21,7 @@ function LoginPage({ setIsAuthenticated }) {
 
   const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? 'http://localhost:5000'
-    : 'https://chainforensix-api.onrender.com';
+    : 'https://forensictoolproject.onrender.com';
 
   const handleLogin = async (e) => {
     e.preventDefault();
