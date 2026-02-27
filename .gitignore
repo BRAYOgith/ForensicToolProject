@@ -91,6 +91,9 @@ ehthumbs.db
 
 # Large model folder - keep on Hugging Face only
 kenya_model_final/
+models/
+afro_xlmr_retrained/
+afro_xlmr_forensics/
 
 # Blockchain build artifacts
 ignition/

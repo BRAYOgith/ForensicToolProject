@@ -54,7 +54,7 @@ app = Flask(__name__)
 allowed_origins = ["https://forensic-tool-project.vercel.app"]
 # In development, allow both localhost and 127.0.0.1
 if os.getenv("FLASK_ENV") == "development" or not os.getenv("FLASK_ENV"):
-    allowed_origins.extend(["http://localhost:3000", "http://127.0.0.1:3000"])
+    allowed_origins.extend(["https://forensic-tool-project.vercel.app", "http://127.0.0.1:3000"])
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 @app.after_request
@@ -65,7 +65,7 @@ def set_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: https: blob:; "
-        "connect-src 'self' https://chainforensix-api.onrender.com https://sepolia.etherscan.io"
+        "connect-src 'self' https://forensictoolproject.onrender.com https://sepolia.etherscan.io"
     )
     
     # Allow local API connections in dev mode
@@ -326,11 +326,11 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 def send_forensic_email(email, token, email_type="activation"):
     if not BREVO_API_KEY:
         logger.warning(f"BREVO_API_KEY not set — printing {email_type} link to console for local testing")
-        link = f"http://localhost:3000/{'activate' if email_type == 'activation' else 'reset-password'}?token={token}"
+        link = f"https://forensic-tool-project.vercel.app/{'activate' if email_type == 'activation' else 'reset-password'}?token={token}"
         print(f"\n=== {email_type.upper()} LINK FOR {email} ===\n{link}\n========================================\n")
         return
 
-    link = f"http://localhost:3000/{'activate' if email_type == 'activation' else 'reset-password'}?token={token}"
+    link = f"https://forensic-tool-project.vercel.app/{'activate' if email_type == 'activation' else 'reset-password'}?token={token}"
     
     subject = "Activate Your ChainForensix Account" if email_type == "activation" else "Reset Your ChainForensix Password"
     title = "Account Activation" if email_type == "activation" else "Password Reset"
@@ -635,7 +635,7 @@ def activate():
             <div style="text-align:center; padding:50px; font-family:Arial;">
                 <h1 style="color:green;">Account Already Activated!</h1>
                 <p>You can now log in.</p>
-                <a href="http://localhost:3000/login" style="color:#1a73e8;">Go to Login →</a>
+                <a href="https://forensic-tool-project.vercel.app/login" style="color:#1a73e8;">Go to Login →</a>
             </div>
             """, 200
 
@@ -648,7 +648,7 @@ def activate():
         <div style="text-align:center; padding:50px; font-family:Arial;">
             <h1 style="color:green;">Account Activated Successfully!</h1>
             <p>You can now log in to Forensic Tool.</p>
-            <a href="http://localhost:3000/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
+            <a href="https://forensic-tool-project.vercel.app/login" style="color:#1a73e8; font-size:18px;">Go to Login →</a>
         </div>
         """, 200
 
