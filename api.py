@@ -5,7 +5,6 @@ import re
 import sqlite3
 import jwt
 import datetime
-import time
 import requests
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
@@ -44,11 +43,19 @@ import pdfkit
 from functools import wraps
 from datetime import timedelta
 from bcrypt import gensalt, hashpw, checkpw
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
-import emoji
 import hashlib
+import time
 from crypto_utils import encrypt_field, decrypt_field
+
+# Heavy dependencies for local inference - wrapped for clean production startup
+try:
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    import torch
+    import emoji
+    STRICT_FORENSIC_READY = True
+except ImportError:
+    logger.warning("Heavy dependencies (transformers, torch, emoji) not found. Local model inference will be disabled.")
+    STRICT_FORENSIC_READY = False
 
 app = Flask(__name__)
 
@@ -92,17 +99,21 @@ limiter = Limiter(
 
 MODEL_PATH = "models/afro_xlmr_forensics"
 
-tokenizer = None
-model = None
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if STRICT_FORENSIC_READY else None
 
 try:
-    logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-    model.to(device)
-    model.eval()
-    logger.info(f"Forensic model loaded on {device}")
+    if STRICT_FORENSIC_READY:
+        logger.info(f"Loading local forensic model (Afro-XLMR) from: {MODEL_PATH}")
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+        model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+        model.to(device)
+        model.eval()
+        logger.info(f"Forensic model loaded on {device}")
+    else:
+        logger.info("Skipping local model load - heavy dependencies missing.")
+except Exception as e:
+    logger.warning(f"Forensic model not loaded: {e}")
+    logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
 except Exception as e:
     logger.warning(f"Forensic model not loaded: {e}")
     logger.info(f"Checked directory: {os.path.abspath(MODEL_PATH)}")
@@ -161,7 +172,8 @@ def extract_forensic_markers(text):
 
 def clean_for_ai(text):
     # Convert real emojis to text (Matches training pipeline)
-    text = emoji.demojize(text)
+    if STRICT_FORENSIC_READY:
+        text = emoji.demojize(text)
     # Standardize handles
     text = re.sub(r'@\w+', '@user', text)
     # Remove URLs
@@ -233,7 +245,8 @@ def query_hf_api(payload):
 
 def predict_defamatory(text):
     # Determine if we should use HF API (Production) or Local Model (Development)
-    use_hf = os.getenv("USE_HF_API", "false").lower() == "true"
+    # Default to TRUE if Render environment is detected or if USE_HF_API is set
+    use_hf = os.getenv("USE_HF_API", "true").lower() == "true"
     
     if use_hf:
         logger.info("Using Hugging Face Inference API for analysis")
@@ -254,7 +267,7 @@ def predict_defamatory(text):
             logger.warning("HF API failed or returned empty - falling back to local/default")
             return {"is_defamatory": False, "category": "Analysis Failure", "confidence": 0.0, "justification": "Model inference failed."}
     else:
-        if not tokenizer or not model:
+        if not STRICT_FORENSIC_READY or not tokenizer or not model:
             return {"is_defamatory": False, "category": "None", "confidence": 0.0}
         
         # Clean text to match model training format
