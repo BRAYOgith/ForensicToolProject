@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -34,6 +34,11 @@ function ReportPage() {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Loading report...');
   const [loading, setLoading] = useState(true);
+
+  // Chart References for PDF capture
+  const weeklyChartRef = useRef(null);
+  const dailyChartRef = useRef(null);
+  const harmChartRef = useRef(null);
 
   const navigate = useNavigate();
   const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -92,7 +97,18 @@ function ReportPage() {
 
     setStatus('Generating PDF report...');
     try {
-      const response = await axios.get(`${API_BASE}/generate-report/${userId}`, {
+      // Capture chart images as base64
+      const weeklyImage = weeklyChartRef.current?.toBase64Image() || '';
+      const dailyImage = dailyChartRef.current?.toBase64Image() || '';
+      const harmImage = harmChartRef.current?.toBase64Image() || '';
+
+      const response = await axios.post(`${API_BASE}/generate-report/${userId}`, {
+        charts: {
+          weekly: weeklyImage.split(',')[1] || '', // Remove data:image/png;base64, prefix
+          daily: dailyImage.split(',')[1] || '',
+          harm: harmImage.split(',')[1] || ''
+        }
+      }, {
         headers: { Authorization: `Bearer ${token}` },
         responseType: 'blob',
       });
@@ -116,21 +132,36 @@ function ReportPage() {
 
 
   const totalFetched = reportData?.fetched.length || 0;
-  const defamatoryCount = reportData?.fetched.filter(item => {
-    return false;
-  }).length || 0;
-  const defamationRate = totalFetched > 0 ? (defamatoryCount / totalFetched) * 100 : 0;
+  const safeCount = reportData?.fetched.filter(item => item.category === 'Safe').length || 0;
+  const defamatoryCount = reportData?.fetched.filter(item => item.category === 'Defamatory').length || 0;
+  const hateSpeechCount = reportData?.fetched.filter(item => item.category === 'Hate Speech').length || 0;
+  
+  const riskRate = totalFetched > 0 ? ((defamatoryCount + hateSpeechCount) / totalFetched) * 100 : 0;
 
-  // Weekly Pie Chart
-  const weeklyChartData = statsData
+  // Weekly Trend Chart (Line)
+  const weeklyChartData = statsData?.trend
     ? {
-      labels: ['Fetches', 'Retrievals'],
+      labels: statsData.trend.map(d => d.date),
       datasets: [
         {
-          data: [statsData.weekly.fetches, statsData.weekly.retrievals],
-          backgroundColor: ['#06b6d4', '#3b82f6'],
-          borderColor: '#0A192F',
-          borderWidth: 2,
+          label: 'Fetches',
+          data: statsData.trend.map(d => d.fetches),
+          borderColor: '#06b6d4',
+          backgroundColor: 'rgba(6, 182, 212, 0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+        },
+        {
+          label: 'Retrievals',
+          data: statsData.trend.map(d => d.retrievals),
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6,
         },
       ],
     }
@@ -155,13 +186,13 @@ function ReportPage() {
     }
     : null;
 
-  // Defamation Rate Pie
+  // AI Forensic Classification Pie
   const defamationPieData = {
-    labels: ['Safe', 'Red-Flag'],
+    labels: ['Safe', 'Defamatory', 'Hate Speech'],
     datasets: [
       {
-        data: [totalFetched - defamatoryCount, defamatoryCount],
-        backgroundColor: ['#10b981', '#ef4444'],
+        data: [safeCount, defamatoryCount, hateSpeechCount],
+        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
         borderColor: '#0A192F',
         borderWidth: 2,
       },
@@ -232,47 +263,56 @@ function ReportPage() {
             Vault Summary
           </h1>
           <div className="flex flex-wrap gap-4 text-[var(--text-secondary)] uppercase text-[10px] font-mono tracking-widest">
-            <span className="bg-[var(--bg-color)] px-4 py-2 rounded-full border border-[var(--border-color)]">Investigator: <span className="text-[var(--text-primary)]">{reportData?.username || 'Unknown'}</span></span>
-            <span className="bg-[var(--bg-color)] px-4 py-2 rounded-full border border-[var(--border-color)]">Last Pulse: <span className="text-[var(--text-primary)]">{new Date().toLocaleDateString()}</span></span>
+            <span className="bg-[#112240] px-4 py-2 rounded-full border border-gray-800">Investigator: <span className="text-cyan-400">{reportData?.username || 'Unknown'}</span></span>
+            <span className="bg-[#112240] px-4 py-2 rounded-full border border-gray-800">Operational Pulse: <span className="text-cyan-400">{new Date().toLocaleDateString()}</span></span>
           </div>
         </div>
 
         {/* Major Counters */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <div className="glass-card p-8 rounded-3xl hover:border-[var(--accent-cyan)]/30 transition-all group">
-            <h3 className="text-[10px] font-bold text-[var(--text-secondary)] uppercase tracking-widest mb-4 group-hover:text-[var(--accent-cyan)] transition-colors">Total Scanned</h3>
-            <p className="text-4xl font-black text-[var(--text-primary)]">{totalFetched}</p>
-          </div>
-          <div className="bg-[#112240]/40 border border-gray-800 p-8 rounded-3xl shadow-xl hover:border-green-400/30 transition-all group">
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 group-hover:text-green-400 transition-colors">On-Chain Secured</h3>
-            <p className="text-5xl font-black text-white">{reportData?.stored.length || 0}</p>
-          </div>
-          <div className="bg-[#112240]/40 border border-gray-800 p-8 rounded-3xl shadow-xl hover:border-red-400/30 transition-all group">
-            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 group-hover:text-red-400 transition-colors">Critical Risk Rate</h3>
-            <p className="text-5xl font-black text-white">{defamationRate.toFixed(1)}%</p>
-          </div>
-        </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                <div className="glass-card p-8 rounded-3xl border-l-4 border-cyan-400 group hover:bg-[#112240]/50 transition-all">
+                  <p className="text-[var(--text-secondary)] uppercase text-[10px] font-mono tracking-widest mb-2">Total Dossiers</p>
+                  <div className="flex items-baseline gap-2">
+                    <h2 className="text-4xl font-black text-white">{totalFetched}</h2>
+                    <span className="text-cyan-400 text-xs font-mono">SCANS</span>
+                  </div>
+                </div>
+                <div className="glass-card p-8 rounded-3xl border-l-4 border-red-500 group hover:bg-[#112240]/50 transition-all">
+                  <p className="text-[var(--text-secondary)] uppercase text-[10px] font-mono tracking-widest mb-2">Threat Vulnerability</p>
+                  <div className="flex items-baseline gap-2">
+                    <h2 className="text-4xl font-black text-white">{riskRate.toFixed(1)}%</h2>
+                    <span className="text-red-500 text-xs font-mono">RISK</span>
+                  </div>
+                </div>
+                <div className="glass-card p-8 rounded-3xl border-l-4 border-gray-600 group hover:bg-[#112240]/50 transition-all">
+                  <p className="text-[var(--text-secondary)] uppercase text-[10px] font-mono tracking-widest mb-2">Blockchain Anchors</p>
+                  <div className="flex items-baseline gap-2">
+                    <h2 className="text-4xl font-black text-white">{reportData?.stored.length || 0}</h2>
+                    <span className="text-gray-500 text-xs font-mono">VERIFIED</span>
+                  </div>
+                </div>
+              </div>
 
         {/* Analytics Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
           <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 shadow-2xl">
             <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-cyan-400 pl-4">Network Activity <span className="text-gray-500 font-mono text-xs">(7-Day)</span></h3>
             <div className="h-[300px]">
-              {weeklyChartData && <Pie data={weeklyChartData} options={chartOptions} />}
+              {weeklyChartData && <Line ref={weeklyChartRef} data={weeklyChartData} options={chartOptions} />}
             </div>
           </div>
 
           <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 shadow-2xl">
             <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-blue-500 pl-4">Daily Comparison <span className="text-gray-500 font-mono text-xs">(Fetches/Log)</span></h3>
             <div className="h-[300px]">
-              {dailyBarData && <Bar data={dailyBarData} options={chartOptions} />}
+              {dailyBarData && <Bar ref={dailyChartRef} data={dailyBarData} options={chartOptions} />}
             </div>
           </div>
 
           <div className="bg-[#112240]/60 backdrop-blur-xl border border-gray-800 rounded-3xl p-8 shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-red-500 pl-4">Harm Assessment <span className="text-gray-500 font-mono text-xs">(AI Sentiment)</span></h3>
+            <h3 className="text-xl font-bold text-white mb-8 border-l-4 border-red-500 pl-4">Forensic Category Distribution <span className="text-gray-500 font-mono text-xs">(AI Verdicts)</span></h3>
             <div className="h-[300px]">
-              <Pie data={defamationPieData} options={chartOptions} />
+              <Pie ref={harmChartRef} data={defamationPieData} options={chartOptions} />
             </div>
           </div>
 
@@ -298,24 +338,47 @@ function ReportPage() {
           </div>
 
           {reportData?.stored.length > 0 ? (
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {reportData.stored.map((item) => (
-                <div key={item.id} className="bg-[#112240]/40 border border-gray-800 rounded-2xl p-6 hover:bg-[#112240]/60 transition-all border-b-cyan-500/50">
-                  <p className="text-cyan-400 font-mono text-[10px] mb-2 uppercase">UID: {item.evidence_id}</p>
-                  <div className="mb-4">
-                    <label className="text-[10px] text-gray-500 font-bold uppercase block">Block Hash</label>
-                    <p className="text-gray-400 font-mono text-[10px] truncate">{item.tx_hash}</p>
+                <div key={item.id} className="bg-[#112240]/40 border border-gray-800 rounded-2xl p-6 hover:bg-[#112240]/60 transition-all border-b-cyan-500/50 flex flex-col justify-between h-full">
+                  <div>
+                    <div className="flex justify-between items-start mb-4">
+                      <p className="text-cyan-400 font-mono text-[10px] uppercase tracking-widest">UID: {item.evidence_id}</p>
+                      <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase border ${
+                        item.category === 'Safe' ? 'text-green-400 border-green-500/30' : 
+                        item.category === 'Hate Speech' ? 'text-red-400 border-red-500/30' :
+                        'text-amber-400 border-amber-500/30'
+                      }`}>
+                        {item.category} ({(item.confidence * 100).toFixed(0)}%)
+                      </span>
+                    </div>
+                    
+                    <div className="mb-4">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase block mb-1">Content Snippet</label>
+                      <p className="text-gray-300 text-xs italic leading-relaxed line-clamp-3">
+                        "{item.content}"
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-2 font-mono">-- @{item.author_username}</p>
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase block">Block Hash</label>
+                      <p className="text-gray-500 font-mono text-[9px] truncate">{item.tx_hash}</p>
+                    </div>
                   </div>
-                  {item.eth_tx_hash && (
-                    <a
-                      href={`https://sepolia.etherscan.io/tx/${item.eth_tx_hash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-white hover:text-cyan-400 text-xs flex items-center gap-2 transition-colors font-bold"
-                    >
-                      VERIFY ON ETHERSCAN ↗
-                    </a>
-                  )}
+
+                  <div className="pt-4 border-t border-gray-800/50 mt-auto">
+                    {item.eth_tx_hash && (
+                      <a
+                        href={`https://sepolia.etherscan.io/tx/${item.eth_tx_hash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-white hover:text-cyan-400 text-[10px] flex items-center gap-2 transition-colors font-bold uppercase tracking-widest"
+                      >
+                        VERIFY ON ETHERSCAN &rarr;
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

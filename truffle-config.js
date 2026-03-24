@@ -12,10 +12,11 @@ module.exports = {
       network_id: 11155111,
       gas: 6000000,
       gasPrice: 20000000000, // 20 Gwei
-      networkCheckTimeout: 60000, // 60 seconds
-      timeoutBlocks: 200,
+      networkCheckTimeout: 120000, // 120 seconds
+      timeoutBlocks: 500,
       skipDryRun: true,
-      confirmations: 2 // Wait for 2 confirmations
+      confirmations: 2,
+      disableConfirmationListener: true
     }
   },
   compilers: {

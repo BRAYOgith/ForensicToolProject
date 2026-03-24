@@ -308,7 +308,7 @@ function LoginPage({ setIsAuthenticated }) {
                     className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-accent focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all font-sans"
                     required
                     disabled={loading}
-                    placeholder="••••••••"
+                    placeholder="********"
                   />
                   <button
                     type="button"
@@ -339,7 +339,7 @@ function LoginPage({ setIsAuthenticated }) {
                       className={`w-full px-4 py-4 bg-[var(--bg-secondary)] border ${confirmPassword ? (password === confirmPassword ? 'border-emerald-500/50' : 'border-red-500/50') : 'border-[var(--border-color)]'} rounded-xl focus:ring-2 focus:ring-accent focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all font-sans`}
                       required
                       disabled={loading}
-                      placeholder="••••••••"
+                      placeholder="********"
                     />
                   </div>
                   <div>
@@ -509,7 +509,7 @@ function LoginPage({ setIsAuthenticated }) {
               disabled={loading}
             >
               <span>{isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}</span>
-              <span className="text-accent">→</span>
+              <span className="text-accent">-></span>
             </button>
           </div>
         </div>

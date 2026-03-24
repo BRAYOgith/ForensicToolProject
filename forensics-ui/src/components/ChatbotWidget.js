@@ -12,7 +12,7 @@ function renderBotText(text) {
         // Bold **text**
         let rendered = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         // Bullet points
-        if (rendered.trim().startsWith('•') || rendered.trim().startsWith('-')) {
+        if (rendered.trim().startsWith('*') || rendered.trim().startsWith('-')) {
             return <p key={i} style={{ margin: '2px 0', paddingLeft: '8px' }} dangerouslySetInnerHTML={{ __html: rendered }} />;
         }
         if (rendered.trim() === '---') {
@@ -109,7 +109,7 @@ function ChatbotWidget() {
                 setUnreadCount(prev => prev + 1);
                 setMessages([{
                     role: 'bot',
-                    text: "Hey! You've been browsing for a bit. I'm ChainForensix Assistant — how can I help you today?",
+                    text: "Hey! You've been browsing for a bit. I'm ChainForensix Assistant -- how can I help you today?",
                     time: new Date(),
                     type: 'info'
                 }]);

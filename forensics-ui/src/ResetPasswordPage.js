@@ -96,7 +96,7 @@ function ResetPasswordPage() {
                                 className="w-full px-4 py-3 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600"
                                 required
                                 disabled={loading || !!success}
-                                placeholder="••••••••"
+                                placeholder="********"
                             />
                             <button
                                 type="button"
@@ -125,7 +125,7 @@ function ResetPasswordPage() {
                             className={`w-full px-4 py-3 bg-[var(--bg-color)] border ${confirmPassword ? (password === confirmPassword ? 'border-green-500' : 'border-red-500') : 'border-[var(--border-color)]'} rounded-xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600`}
                             required
                             disabled={loading || !!success}
-                            placeholder="••••••••"
+                            placeholder="********"
                         />
                         {confirmPassword && (
                             <p className={`text-[10px] font-bold mt-1 ${password === confirmPassword ? 'text-green-500' : 'text-red-500'}`}>

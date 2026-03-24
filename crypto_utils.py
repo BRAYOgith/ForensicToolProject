@@ -16,7 +16,7 @@ _ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 def _get_key():
     """Get the AES-256 key (32 bytes) from the ENCRYPTION_KEY env var (64-char hex)."""
     if not _ENCRYPTION_KEY:
-        logger.warning("ENCRYPTION_KEY not set — encryption/decryption disabled, storing plaintext.")
+        logger.warning("ENCRYPTION_KEY not set -- encryption/decryption disabled, storing plaintext.")
         return None
     try:
         key = bytes.fromhex(_ENCRYPTION_KEY)

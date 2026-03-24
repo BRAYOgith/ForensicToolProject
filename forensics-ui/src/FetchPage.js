@@ -201,7 +201,8 @@ function FetchPage() {
       setStoredResult({
         evidence_id: response.data.evidence_id,
         tx_hash: response.data.tx_hash,
-        eth_tx_hash: response.data.eth_tx_hash
+        eth_tx_hash: response.data.eth_tx_hash,
+        etherscan_url: response.data.etherscan_url
       });
       setStatus(`Success: Stored with Evidence ID: ${response.data.evidence_id}`);
     } catch (error) {
@@ -298,7 +299,7 @@ function FetchPage() {
           {searchResults.length > 0 && (
             <div className="mt-10 animate-fade-in">
               <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                <span className="text-cyan-400">●</span> Matching Targets Found
+                <span className="text-cyan-400">STATUS:</span> Matching Targets Found
               </h3>
               <div className="space-y-4" role="list">
                 {searchResults.map((post) => (
@@ -530,12 +531,12 @@ function FetchPage() {
                 <div>
                   <span className="text-gray-500 uppercase block mb-1">Ethereum Verification (Sepolia)</span>
                   <a
-                    href={`https://sepolia.etherscan.io/tx/${storedResult.eth_tx_hash}`}
+                    href={storedResult.etherscan_url || `https://sepolia.etherscan.io/tx/${storedResult.eth_tx_hash}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-cyan-400 hover:underline break-all block text-[10px]"
                   >
-                    {storedResult.eth_tx_hash}
+                    {storedResult.etherscan_url || storedResult.eth_tx_hash}
                   </a>
                 </div>
               </div>

@@ -30,7 +30,7 @@ function ActivatePage() {
 
   useEffect(() => {
     if (!token) {
-      setMessage('Invalid activation link — no token found');
+      setMessage('Invalid activation link -- no token found');
       return;
     }
 

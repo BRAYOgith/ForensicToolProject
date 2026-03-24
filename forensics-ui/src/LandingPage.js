@@ -350,7 +350,7 @@ const LandingPage = () => {
                                             "{didYouKnowFacts[activeFact].fact}"
                                         </p>
                                         <div className="mt-8 text-xs font-mono opacity-60">
-                                            {didYouKnowFacts[activeFact].category} • {activeFact + 1}/{didYouKnowFacts.length}
+                                            {didYouKnowFacts[activeFact].category} * {activeFact + 1}/{didYouKnowFacts.length}
                                         </div>
                                     </div>
 
@@ -361,7 +361,7 @@ const LandingPage = () => {
                                 {/* Click Hint */}
                                 <div className="absolute -bottom-10 w-full text-center">
                                     <span className="text-xs text-[var(--text-secondary)] font-bold uppercase tracking-widest animate-bounce cursor-pointer flex items-center justify-center gap-2">
-                                        Tap to Flip <span className="text-xl">↻</span>
+                                        Tap to Flip <span className="text-xl">REFRESH</span>
                                     </span>
                                 </div>
                             </div>
@@ -376,7 +376,7 @@ const LandingPage = () => {
                     </div>
                     <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-8 reveal">
                         <div className="bg-white p-8 rounded shadow-sm border border-gray-100">
-                            <div className="flex gap-1 text-yellow-500 mb-4">★★★★★</div>
+                            <div className="flex gap-1 text-yellow-500 mb-4">5/5 Stars</div>
                             <p className="text-[var(--text-secondary)] italic mb-6 leading-relaxed">
                                 "In high-stakes defamation cases, the integrity of evidence is paramount. ChainForensix provides the only solution that gives us absolute confidence when presenting digital evidence in court."
                             </p>
@@ -389,7 +389,7 @@ const LandingPage = () => {
                             </div>
                         </div>
                         <div className="bg-white p-8 rounded shadow-sm border border-gray-100">
-                            <div className="flex gap-1 text-yellow-500 mb-4">★★★★★</div>
+                            <div className="flex gap-1 text-yellow-500 mb-4">5/5 Stars</div>
                             <p className="text-[var(--text-secondary)] italic mb-6 leading-relaxed">
                                 "The speed at which we can secure posts before they are deleted has changed how we approach online harassment investigations. An indispensable tool for modern forensics."
                             </p>
