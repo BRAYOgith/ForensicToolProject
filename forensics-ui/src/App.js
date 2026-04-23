@@ -14,6 +14,7 @@ import PrivacyPage from './PrivacyPage';
 import TermsPage from './TermsPage';
 import Footer from './Footer';
 import ChatbotWidget from './components/ChatbotWidget';
+import AdminDashboard from './AdminDashboard';
 import './index.css';
 
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -71,6 +72,38 @@ function ActivatePage() {
   );
 }
 
+function UserProtectedRoute({ children }) {
+  const token = localStorage.getItem('token');
+  const isAdmin = localStorage.getItem('is_admin') === '1';
+  const location = useLocation();
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (isAdmin) {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return children;
+}
+
+function AdminProtectedRoute({ children }) {
+  const token = localStorage.getItem('token');
+  const isAdmin = localStorage.getItem('is_admin') === '1';
+  const location = useLocation();
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (!isAdmin) {
+    return <Navigate to="/analyze" replace />;
+  }
+
+  return children;
+}
+
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem('token');
   const location = useLocation();
@@ -94,7 +127,7 @@ function MainLayout() {
   useEffect(() => {
     // Determine Theme Mode based on Route
     const path = location.pathname;
-    const isTechRoute = ['/login', '/analyze', '/retrieve', '/report', '/activate', '/reset-password'].some(r => path.startsWith(r));
+    const isTechRoute = ['/login', '/analyze', '/retrieve', '/report', '/activate', '/reset-password', '/admin'].some(r => path.startsWith(r));
     const mode = isTechRoute ? 'tech' : 'consultancy';
 
     document.body.setAttribute('data-theme-mode', mode);
@@ -112,6 +145,7 @@ function MainLayout() {
     localStorage.removeItem('token');
     localStorage.removeItem('user_id');
     localStorage.removeItem('username');
+    localStorage.removeItem('is_admin');
     setIsAuthenticated(false);
     window.location.href = '/login';
   };
@@ -159,12 +193,18 @@ function MainLayout() {
               </>
             ) : (
               <>
-                <Link to="/analyze" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Analysis</Link>
-                <Link to="/retrieve" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Evidence</Link>
-                <Link to="/report" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Reports</Link>
+                {localStorage.getItem('is_admin') === '1' ? (
+                  <Link to="/admin" className="text-cyan-400 hover:text-cyan-300 font-bold text-base transition-colors border border-cyan-500/30 px-3 py-1 rounded-lg bg-cyan-500/10">Admin Dashboard</Link>
+                ) : (
+                  <>
+                    <Link to="/analyze" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Analysis</Link>
+                    <Link to="/retrieve" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Evidence</Link>
+                    <Link to="/report" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Reports</Link>
+                  </>
+                )}
                 <button
                   onClick={handleLogout}
-                  className="text-red-400 hover:text-red-600 font-medium text-base transition-colors"
+                  className="text-red-400 hover:text-red-600 font-medium text-base transition-colors ml-4"
                   aria-label="Logout"
                 >
                   Logout
@@ -189,37 +229,49 @@ function MainLayout() {
           <Route
             path="/analyze"
             element={
-              <ProtectedRoute>
+              <UserProtectedRoute>
                 <div className="flex items-center justify-center p-6 w-full h-full flex-1">
                   <div className="w-full max-w-4xl">
                     <FetchPage />
                   </div>
                 </div>
-              </ProtectedRoute>
+              </UserProtectedRoute>
             }
           />
           <Route
             path="/retrieve"
             element={
-              <ProtectedRoute>
+              <UserProtectedRoute>
                 <div className="flex items-center justify-center p-6 w-full h-full flex-1">
                   <div className="w-full max-w-4xl">
                     <RetrievePage />
                   </div>
                 </div>
-              </ProtectedRoute>
+              </UserProtectedRoute>
             }
           />
           <Route
             path="/report"
             element={
-              <ProtectedRoute>
+              <UserProtectedRoute>
                 <div className="flex items-center justify-center p-6 w-full h-full flex-1">
                   <div className="w-full max-w-4xl">
                     <ReportPage />
                   </div>
                 </div>
-              </ProtectedRoute>
+              </UserProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <AdminProtectedRoute>
+                <div className="flex items-center justify-center p-6 w-full h-full flex-1">
+                  <div className="w-full">
+                    <AdminDashboard />
+                  </div>
+                </div>
+              </AdminProtectedRoute>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

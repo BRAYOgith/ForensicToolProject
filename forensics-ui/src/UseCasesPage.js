@@ -14,7 +14,7 @@ const UseCasesPage = () => {
 
             <header className="bg-[var(--bg-secondary)] py-16 border-b border-[var(--border-color)]">
                 <div className="max-w-4xl mx-auto px-6 text-center">
-                    <span className="text-accent font-bold tracking-widest uppercase text-xs mb-4 block">Applications</span>
+                    <span className="text-accent font-bold tracking-widest uppercase text-sm mb-4 block">Applications</span>
                     <h1 className="text-4xl md:text-5xl font-heading font-bold mb-6 text-[var(--text-primary)]">
                         Use Cases
                     </h1>
@@ -54,7 +54,7 @@ const UseCasesPage = () => {
                     </div>
                     <div className="bg-[var(--bg-secondary)] p-8 rounded-xl border border-[var(--border-color)]">
                         <h3 className="text-lg font-bold mb-4 font-heading">Scenario: Cyberstalking</h3>
-                        <p className="text-sm text-[var(--text-secondary)] italic mb-4">
+                        <p className="text-base text-[var(--text-secondary)] italic mb-4">
                             "An anonymous account is posting private photos. Reporting to the platform takes days, and posts are deleted before I can document them."
                         </p>
                         <div className="bg-[var(--bg-color)] p-4 rounded text-xs border border-[var(--border-color)]">
@@ -92,7 +92,7 @@ const UseCasesPage = () => {
                     </div>
                     <div className="md:order-1 bg-[var(--bg-secondary)] p-8 rounded-xl border border-[var(--border-color)]">
                         <h3 className="text-lg font-bold mb-4 font-heading">Scenario: Defamation Lawsuit</h3>
-                        <p className="text-sm text-[var(--text-secondary)] italic mb-4">
+                        <p className="text-base text-[var(--text-secondary)] italic mb-4">
                             "The opposing counsel argues that the screenshots provided by the plaintiff were fabricated in Photoshop."
                         </p>
                         <div className="bg-[var(--bg-color)] p-4 rounded text-xs border border-[var(--border-color)]">
@@ -129,7 +129,7 @@ const UseCasesPage = () => {
                     </div>
                     <div className="bg-[var(--bg-secondary)] p-8 rounded-xl border border-[var(--border-color)]">
                         <h3 className="text-lg font-bold mb-4 font-heading">Scenario: Disinformation Network</h3>
-                        <p className="text-sm text-[var(--text-secondary)] italic mb-4">
+                        <p className="text-base text-[var(--text-secondary)] italic mb-4">
                             "Tracking a coordinated bot network spreading false information across multiple accounts."
                         </p>
                         <div className="bg-[var(--bg-color)] p-4 rounded text-xs border border-[var(--border-color)]">

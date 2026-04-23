@@ -77,7 +77,7 @@ function ResetPasswordPage() {
 
             <div className="glass-card rounded-3xl p-10 max-w-md w-full relative z-10 text-center">
                 <h2 className="text-3xl font-extrabold text-[var(--text-primary)] mb-2">Secure Reset</h2>
-                <p className="text-[var(--accent-cyan)] font-mono text-xs tracking-widest uppercase italic font-bold mb-8">ChainForensix</p>
+                <p className="text-[var(--accent-cyan)] font-mono text-sm tracking-widest uppercase italic font-bold mb-8">ChainForensix</p>
 
                 {success && (
                     <div className="bg-green-500/10 border border-green-500/50 text-green-400 px-4 py-3 rounded-xl mb-6 text-sm">
@@ -101,34 +101,43 @@ function ResetPasswordPage() {
                             <button
                                 type="button"
                                 onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] text-xs font-bold uppercase"
+                                className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] text-sm font-bold uppercase transition-colors"
                             >
                                 {showPassword ? "Hide" : "Show"}
                             </button>
                         </div>
                         {password && (
                             <div className="mt-2 space-y-1">
-                                <p className={`text-[10px] font-bold ${password.length >= 8 ? 'text-green-500' : 'text-gray-500'}`}>✓ MIN 8 CHARACTERS</p>
-                                <p className={`text-[10px] font-bold ${/[A-Z]/.test(password) && /[a-z]/.test(password) ? 'text-green-500' : 'text-gray-500'}`}>✓ UPPER & LOWER CASE</p>
-                                <p className={`text-[10px] font-bold ${/\d/.test(password) ? 'text-green-500' : 'text-gray-500'}`}>✓ INCLUDES NUMBER</p>
-                                <p className={`text-[10px] font-bold ${/[@$!%*?&]/.test(password) ? 'text-green-500' : 'text-gray-500'}`}>✓ INCLUDES SYMBOL</p>
+                                <p className={`text-xs font-bold ${password.length >= 8 ? 'text-green-400' : 'text-[var(--text-secondary)]'}`}>✓ AT LEAST 8 CHARACTERS</p>
+                                <p className={`text-xs font-bold ${/[A-Z]/.test(password) && /[a-z]/.test(password) ? 'text-green-400' : 'text-[var(--text-secondary)]'}`}>✓ UPPER & LOWER CASE</p>
+                                <p className={`text-xs font-bold ${/\d/.test(password) ? 'text-green-400' : 'text-[var(--text-secondary)]'}`}>✓ INCLUDES NUMBER</p>
+                                <p className={`text-xs font-bold ${/[@$!%*?&]/.test(password) ? 'text-green-400' : 'text-[var(--text-secondary)]'}`}>✓ INCLUDES SYMBOL</p>
                             </div>
                         )}
                     </div>
 
                     <div className="relative">
                         <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Confirm Password</label>
-                        <input
-                            type={showPassword ? "text" : "password"}
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            className={`w-full px-4 py-3 bg-[var(--bg-color)] border ${confirmPassword ? (password === confirmPassword ? 'border-green-500' : 'border-red-500') : 'border-[var(--border-color)]'} rounded-xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600`}
-                            required
-                            disabled={loading || !!success}
-                            placeholder="********"
-                        />
+                        <div className="relative">
+                            <input
+                                type={showPassword ? "text" : "password"}
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                className={`w-full px-4 py-3 bg-[var(--bg-color)] border ${confirmPassword ? (password === confirmPassword ? 'border-green-500' : 'border-red-500') : 'border-[var(--border-color)]'} rounded-xl focus:ring-2 focus:ring-[var(--accent-cyan)] focus:border-transparent text-[var(--text-primary)] placeholder-gray-600`}
+                                required
+                                disabled={loading || !!success}
+                                placeholder="********"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] hover:text-[var(--accent-cyan)] text-sm font-bold uppercase transition-colors"
+                            >
+                                {showPassword ? "Hide" : "Show"}
+                            </button>
+                        </div>
                         {confirmPassword && (
-                            <p className={`text-[10px] font-bold mt-1 ${password === confirmPassword ? 'text-green-500' : 'text-red-500'}`}>
+                            <p className={`text-xs font-bold mt-1 ${password === confirmPassword ? 'text-green-400' : 'text-red-400'}`}>
                                 {password === confirmPassword ? '✓ PASSWORDS MATCH' : '✗ PASSWORDS MISMATCH'}
                             </p>
                         )}
