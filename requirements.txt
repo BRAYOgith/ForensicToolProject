@@ -23,3 +23,4 @@ matplotlib
 apscheduler
 numpy
 pandas
+cryptography
