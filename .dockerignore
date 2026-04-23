@@ -1,0 +1,36 @@
+# Virtual Environments
+venv/
+env/
+forensic_tool_env/
+.env
+
+# Python cache & compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node.js
+node_modules/
+npm/
+package-lock.json
+package.json
+
+# Git repository files
+.git/
+.gitignore
+
+# Local databases
+# Ignoring local db so the container starts fresh or uses a connected Postgres/SQLite volume
+forensic.db
+*.sqlite3
+
+# Logs
+*.log
+forensic.log
+
+# Blockchain build files
+artifacts/
+cache/
+build/
