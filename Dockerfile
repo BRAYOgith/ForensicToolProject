@@ -1,36 +1,24 @@
-# Use an official Python runtime as a parent image
+# Use Python slim base
 FROM python:3.11-slim
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies required by your libraries
-# - weasyprint needs libpango, libffi
-# - pdfkit needs wkhtmltopdf
-# - easyocr and torch need libgl1, libglib
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpango-1.0-0 \
-    libpangoft2-1.0-0 \
-    libffi-dev \
-    wkhtmltopdf \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Minimal system deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget libgl1 libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file into the container
+# Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies with CPU-only PyTorch to save space/time
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python deps ignoring torch errors (will use HF API instead)
+RUN pip install --no-cache-dir -r requirements.txt || true
 
-# Copy the rest of the application code
+# Copy app code
 COPY . .
 
-# Expose port (Render sets its own PORT environment variable)
+# Expose port
 EXPOSE 5000
 
-# Run gunicorn to serve the Flask app
-# Gunicorn is much better for production than the default Flask server
-CMD ["sh", "-c", "gunicorn -w 2 -b 0.0.0.0:${PORT:-5000} api:app"]
+# Run gunicorn - uses HuggingFace API for AI (not local model)
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "api:app"]
