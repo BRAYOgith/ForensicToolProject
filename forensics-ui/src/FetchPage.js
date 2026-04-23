@@ -220,8 +220,10 @@ function FetchPage() {
 
   const defamation = fetchedPost?.defamation;
   const isDefamatory = defamation?.is_defamatory;
-  const category = defamation?.category || 'Safe';
+  const rawCategory = defamation?.category;
+  const category = (rawCategory === 'Safe' || rawCategory === 'Defamatory' || rawCategory === 'Hate Speech') ? rawCategory : 'Safe';
   const confidence = defamation?.confidence || 0;
+  const isAiClassified = rawCategory && rawCategory !== 'Pending' && rawCategory !== 'Error';
 
   return (
     <div className="min-h-screen bg-[var(--bg-color)] py-8 px-4 font-sans relative overflow-hidden transition-colors duration-300">
@@ -235,12 +237,12 @@ function FetchPage() {
             <h2 className="text-3xl font-extrabold text-[var(--text-primary)] mb-2">
               Forensic Analysis
             </h2>
-            <p className="text-[var(--accent-cyan)] font-mono text-xs tracking-widest uppercase italic">X (Twitter) Scraper & AI Audit</p>
+            <p className="text-[var(--accent-cyan)] font-mono text-sm tracking-widest uppercase italic font-bold">X (Twitter) Scraper & AI Audit</p>
           </header>
 
           <form onSubmit={handleFetchPost} className="space-y-6">
             <div className="group">
-              <label htmlFor="postId" className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+              <label htmlFor="postId" className="block text-sm font-bold text-gray-400 mb-2 uppercase tracking-[0.15em] group-focus-within:text-cyan-400 transition-colors">
                 X Post ID
               </label>
               <input
@@ -255,7 +257,7 @@ function FetchPage() {
             </div>
 
             <div className="relative group">
-              <label htmlFor="inputText" className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+              <label htmlFor="inputText" className="block text-sm font-bold text-gray-400 mb-2 uppercase tracking-[0.15em] group-focus-within:text-cyan-400 transition-colors">
                 Search by Content
               </label>
               <textarea
@@ -289,8 +291,8 @@ function FetchPage() {
               aria-live="polite"
               className={`mt-8 p-4 bg-[var(--bg-color)]/50 border rounded-xl text-center ${status.toLowerCase().includes('error') ? 'border-red-500/50' : 'border-gray-800'}`}
             >
-              <p className="text-gray-400 text-sm font-mono uppercase">
-                Console Output: <span className={`${status.toLowerCase().includes('error') ? 'text-red-400' : 'text-cyan-400'} ml-2`}>{status}</span>
+              <p className="text-gray-400 text-base font-mono uppercase font-medium">
+                Console Output: <span className={`${status.toLowerCase().includes('error') ? 'text-red-400' : 'text-cyan-400'} ml-2 font-black`}>{status}</span>
               </p>
             </div>
           )}
@@ -313,12 +315,12 @@ function FetchPage() {
                     className="bg-[var(--bg-color)] p-4 rounded-2xl border border-gray-700 cursor-pointer hover:border-cyan-500/50 hover:bg-[#112240] transition-all group shadow-md"
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <span className="text-cyan-400 text-xs font-mono">@{post.author_username}</span>
-                      <span className="text-gray-500 text-[10px]">{post.created_at}</span>
+                      <span className="text-cyan-400 text-sm font-mono font-bold">@{post.author_username}</span>
+                      <span className="text-gray-500 text-xs font-bold">{post.created_at}</span>
                     </div>
                     <p className="text-gray-300 text-sm italic">"{post.text}"</p>
                     {post.engagement && (
-                      <div className="mt-2 flex gap-4 text-[9px] text-gray-500 font-mono">
+                      <div className="mt-2 flex gap-4 text-xs text-gray-400 font-mono font-bold">
                         <span>L: {post.engagement.likes}</span>
                         <span>R: {post.engagement.retweets}</span>
                       </div>
@@ -337,7 +339,7 @@ function FetchPage() {
                 {/* Visual Verification Stage */}
                 {!isVisualConfirmed && fetchedPost.requires_confirmation && (
                   <div className="mb-10 p-6 bg-cyan-950/20 border-2 border-cyan-500/30 rounded-3xl animate-pulse-slow">
-                    <h4 className="text-cyan-400 font-bold mb-2 flex items-center gap-2 text-sm">
+                    <h4 className="text-cyan-400 font-black mb-2 flex items-center gap-2 text-base tracking-tight">
                       <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
                       FORENSIC MEDIA SCAN: {
                         fetchedPost.visual_status === 'service_unavailable' ? 'SERVICE INITIALIZING' :
@@ -353,7 +355,7 @@ function FetchPage() {
                         The system scanned the attached media but found no readable text. Proceeding will analyze only the Tweet content.
                       </div>
                     ) : (
-                      <p className="text-gray-400 text-[10px] mb-4 italic leading-tight">
+                      <p className="text-gray-400 text-xs mb-4 italic leading-relaxed font-medium">
                         AI identified text inside media attachments. Review the extraction below for forensic accuracy before proceeding.
                       </p>
                     )}
@@ -387,17 +389,17 @@ function FetchPage() {
                         }`}
                     >
                       <div className="relative z-10">
-                        <h4 className="text-sm uppercase tracking-[0.2em] mb-2 opacity-80">Final AI Forensic Verdict</h4>
+                        <h4 className="text-base uppercase tracking-[0.2em] mb-2 opacity-80 font-bold">Final AI Forensic Verdict</h4>
                         <p className="text-3xl font-black mb-2">
                           {category === 'Hate Speech' ? 'LEGAL FLAG: HATE SPEECH (NCIC)' :
                             category === 'Defamatory' ? 'SYSTEM FLAG: DEFAMATORY CONTENT' :
                               'SYSTEM STATUS: NEUTRAL / CLEAR'}
                         </p>
-                        <p className="font-mono text-xs mb-4">PRIMARY CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
+                        <p className="font-mono text-sm mb-4 font-black">PRIMARY CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
 
                         {defamation.evidence_source && (
-                          <div className="inline-block mb-4 px-3 py-1 bg-white/10 rounded-full border border-white/20 text-[10px] uppercase tracking-widest">
-                            Primary Evidence Source: <span className="text-cyan-300 font-bold ml-1">{defamation.evidence_source}</span>
+                          <div className="inline-block mb-4 px-4 py-1.5 bg-white/10 rounded-full border border-white/20 text-xs uppercase tracking-widest font-black">
+                            Primary Evidence Source: <span className="text-cyan-300 ml-1">{defamation.evidence_source}</span>
                           </div>
                         )}
 
@@ -414,8 +416,8 @@ function FetchPage() {
                       {Object.entries(defamation.all_scores).map(([key, score]) => (
                         <div key={key} className="bg-[var(--bg-color)] p-4 rounded-2xl border border-gray-800 shadow-inner group">
                           <div className="flex justify-between items-center mb-2">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{key.replace('_', ' ')}</span>
-                            <span className={`text-xs font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-600'}`}>{(score * 100).toFixed(1)}%</span>
+                            <span className="text-xs font-black text-gray-400 uppercase tracking-widest">{key.replace('_', ' ')}</span>
+                            <span className={`text-sm font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-400'} font-bold`}>{(score * 100).toFixed(1)}%</span>
                           </div>
                           <div className="h-1.5 w-full bg-gray-900 rounded-full overflow-hidden">
                             <div
@@ -423,7 +425,7 @@ function FetchPage() {
                               style={{ width: `${score * 100}%` }}
                             ></div>
                           </div>
-                          <p className="text-[9px] text-gray-600 mt-2 leading-tight opacity-0 group-hover:opacity-100 transition-opacity">
+                          <p className="text-xs text-gray-400 mt-2 leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity font-medium italic">
                             {defamation.all_justifications[key]}
                           </p>
                         </div>
@@ -431,8 +433,8 @@ function FetchPage() {
                     </div>
 
                     <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
-                      <p className="text-[10px] text-cyan-400/80 font-mono italic">
-                        <span className="font-bold uppercase mr-2">Technical Engine Note:</span>
+                      <p className="text-xs text-cyan-400/90 font-mono italic">
+                        <span className="font-black uppercase mr-2 underline decoration-cyan-500/30">Technical Engine Note:</span>
                         {defamation.technical_justification}
                       </p>
                     </div>
@@ -441,18 +443,18 @@ function FetchPage() {
 
                 <div className="grid md:grid-cols-2 gap-8 mb-8">
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Subject Profile</label>
+                    <label className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-1 block">Subject Profile</label>
                     <p className="text-white font-bold text-lg">@{fetchedPost.author_username || 'N/A'}</p>
                   </div>
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Timestamp</label>
+                    <label className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-1 block">Timestamp</label>
                     <p className="text-white font-bold text-lg">{fetchedPost.created_at || 'N/A'}</p>
                   </div>
                 </div>
 
                 {fetchedPost.engagement && (
                   <div className="mb-8">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-4 block">Engagement Metrics (X Free Tier)</label>
+                    <label className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-4 block">Engagement Metrics (X Free Tier)</label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {[
                         { label: 'Retweets', value: fetchedPost.engagement.retweets },
@@ -461,7 +463,7 @@ function FetchPage() {
                         { label: 'Views', value: fetchedPost.engagement.views }
                       ].map((stat, i) => (
                         <div key={i} className="bg-[var(--bg-color)] p-4 rounded-xl border border-gray-800 text-center shadow-inner">
-                          <p className="text-[9px] text-gray-500 uppercase mb-1">{stat.label}</p>
+                          <p className="text-xs text-gray-400 uppercase mb-1 font-bold">{stat.label}</p>
                           <p className="text-white font-black text-lg">{stat.value?.toLocaleString() || '0'}</p>
                         </div>
                       ))}
@@ -470,7 +472,7 @@ function FetchPage() {
                 )}
 
                 <div className="bg-[var(--bg-color)] p-8 rounded-3xl border border-gray-800 shadow-inner mb-10">
-                  <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-3 block">Scraped Raw Content</label>
+                  <label className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-3 block">Scraped Raw Content</label>
                   <p className="text-gray-300 leading-relaxed italic">
                     "{fetchedPost.text || 'No text content found.'}"
                   </p>
@@ -478,7 +480,7 @@ function FetchPage() {
 
                 {fetchedPost.media_urls?.length > 0 && (
                   <div className="mb-10">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-4 block">Secured Media ({fetchedPost.media_urls.length})</label>
+                    <label className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-4 block">Secured Media ({fetchedPost.media_urls.length})</label>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {fetchedPost.media_urls.map((url, i) => (
                         <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-gray-800 shadow-lg group">
@@ -495,50 +497,52 @@ function FetchPage() {
                   </div>
                 )}
 
-                <button
-                  onClick={handleStoreEvidence}
-                  disabled={loading}
-                  className={`w-full py-5 rounded-2xl text-xl font-black transition-all shadow-2xl relative overflow-hidden group ${isDefamatory
-                    ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/20'
-                    : 'bg-green-600 hover:bg-green-700 text-white shadow-green-900/20'
-                    } disabled:opacity-50`}
-                >
-                  <span className="relative z-10 flex items-center justify-center gap-3">
-                    {loading ? (
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    ) : 'SECURE ON BLOCKCHAIN'}
-                  </span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Stored Result */}
-          {storedResult && (
-            <div className="mt-12 p-8 bg-cyan-500/5 border-2 border-cyan-500/30 rounded-3xl shadow-cyan-900/20 animate-pulse-slow">
-              <h3 className="text-2xl font-black text-cyan-400 mb-6 text-center uppercase tracking-tighter">
-                Evidence Immutable & Secured
-              </h3>
-              <div className="space-y-4 font-mono text-sm">
-                <div className="flex justify-between items-center py-2 border-b border-cyan-500/10">
-                  <span className="text-gray-500 uppercase">Evidence UID</span>
-                  <span className="text-white text-right">{storedResult.evidence_id}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500 uppercase block mb-1">Blockchain Hash</span>
-                  <p className="text-gray-400 break-all bg-[var(--bg-color)] p-3 rounded-lg border border-gray-800 text-[10px]">{storedResult.tx_hash}</p>
-                </div>
-                <div>
-                  <span className="text-gray-500 uppercase block mb-1">Ethereum Verification (Sepolia)</span>
-                  <a
-                    href={storedResult.etherscan_url || `https://sepolia.etherscan.io/tx/${storedResult.eth_tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-cyan-400 hover:underline break-all block text-[10px]"
+                {isAiClassified && (
+                  <button
+                    onClick={handleStoreEvidence}
+                    disabled={loading}
+                    className={`w-full py-5 rounded-2xl text-xl font-black transition-all shadow-2xl relative overflow-hidden group ${isDefamatory
+                      ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/20'
+                      : 'bg-green-600 hover:bg-green-700 text-white shadow-green-900/20'
+                      } disabled:opacity-50`}
                   >
-                    {storedResult.etherscan_url || storedResult.eth_tx_hash}
-                  </a>
-                </div>
+                    <span className="relative z-10 flex items-center justify-center gap-3">
+                      {loading ? (
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      ) : 'SECURE ON BLOCKCHAIN'}
+                    </span>
+                  </button>
+                )}
+
+                {/* Stored Result */}
+                {storedResult && (
+                  <div className="mt-12 p-8 bg-cyan-500/5 border-2 border-cyan-500/30 rounded-3xl shadow-cyan-900/20 animate-pulse-slow">
+                    <h3 className="text-2xl font-black text-cyan-400 mb-6 text-center uppercase tracking-tighter">
+                      Evidence Immutable & Secured
+                    </h3>
+                    <div className="space-y-4 font-mono text-sm">
+                      <div className="flex justify-between items-center py-2 border-b border-cyan-500/10">
+                        <span className="text-gray-500 uppercase">Evidence UID</span>
+                        <span className="text-white text-right">{storedResult.evidence_id}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 uppercase block mb-1">Blockchain Hash</span>
+                        <p className="text-gray-400 break-all bg-[var(--bg-color)] p-4 rounded-xl border border-gray-800 text-xs font-bold shadow-inner">{storedResult.tx_hash}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 uppercase block mb-1">Ethereum Verification (Sepolia)</span>
+                        <a
+                          href={storedResult.etherscan_url || `https://sepolia.etherscan.io/tx/${storedResult.eth_tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-400 hover:underline break-all block text-xs font-bold"
+                        >
+                          {storedResult.etherscan_url || storedResult.eth_tx_hash}
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

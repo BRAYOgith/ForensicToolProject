@@ -17,6 +17,17 @@ import pdfkit
 import io
 import base64
 
+def generate_pdf(html_content, options=None):
+    try:
+        return pdfkit.from_string(html_content, False, options=options or {})
+    except OSError as e:
+        if 'wkhtmltopdf' in str(e).lower():
+            raise Exception("PDF generation unavailable: wkhtmltopdf not installed on server.")
+        raise
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+        raise
+
 # Initialize Logging first
 logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -113,6 +124,42 @@ def set_security_headers(response):
 
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+
+# Session security settings
+SESSION_TIMEOUT_HOURS = int(os.getenv('SESSION_TIMEOUT_HOURS', 24))
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+PASSWORD_HISTORY_SIZE = 5
+FORCE_PASSWORD_CHANGE_DAYS = 90
+
+# Simple CAPTCHA generator
+CAPTCHA_CODE = {}
+def generate_captcha():
+    import random
+    num1 = random.randint(1, 10)
+    num2 = random.randint(1, 10)
+    op = random.choice(['+', '-', '*'])
+    if op == '+':
+        answer = num1 + num2
+    elif op == '-':
+        answer = num1 - num2
+    else:
+        answer = num1 * num2
+    code = f"{num1} {op} {num2}"
+    captcha_id = os.urandom(8).hex()
+    CAPTCHA_CODE[captcha_id] = answer
+    return captcha_id, code
+
+def verify_captcha(captcha_id, user_answer):
+    if captcha_id not in CAPTCHA_CODE:
+        return False
+    try:
+        correct = str(CAPTCHA_CODE[captcha_id]) == str(user_answer)
+        if correct:
+            del CAPTCHA_CODE[captcha_id]
+        return correct
+    except:
+        return False
 
 limiter = Limiter(
     app=app,
@@ -487,6 +534,25 @@ def init_db():
             entry_hash TEXT
         )''')
     
+    # Add security columns to users table if missing
+    try:
+        columns = [row[1] for row in c.execute('PRAGMA table_info(users)').fetchall()]
+        if 'failed_attempts' not in columns:
+            c.execute('ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0')
+        if 'lockout_until' not in columns:
+            c.execute('ALTER TABLE users ADD COLUMN lockout_until TEXT')
+        if 'password_history' not in columns:
+            c.execute('ALTER TABLE users ADD COLUMN password_history TEXT')
+        if 'last_password_change' not in columns:
+            c.execute('ALTER TABLE users ADD COLUMN last_password_change TEXT')
+        if 'last_login' not in columns:
+            c.execute('ALTER TABLE users ADD COLUMN last_login TEXT')
+        if 'last_login_ip' not in columns:
+            c.execute('ALTER TABLE users ADD COLUMN last_login_ip TEXT')
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Could not add security columns: {e}")
+    
     conn.commit()
     conn.close()
 
@@ -596,10 +662,13 @@ def register():
         return jsonify({'error': validation_error}), 400
 
     hashed = hashpw(password.encode('utf-8'), gensalt())
+    password_history_json = json.dumps([hashed.decode('utf-8')])  # Store hash, not plain password
+    
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     try:
-        c.execute('INSERT INTO users (username, password, email, is_active) VALUES (?, ?, ?, 0)', (username, hashed, email))
+        c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 0)', 
+                  (username, hashed, email, 'pending', password_history_json, datetime.now().isoformat()))
         user_id = c.lastrowid
         conn.commit()
         activation_token = jwt.encode({
@@ -608,13 +677,18 @@ def register():
         }, app.config['SECRET_KEY'])
         send_forensic_email(email, activation_token, email_type="activation")
         conn.close()
-        return jsonify({'message': 'Registration successful. Please check your email to activate your account.'}), 201
+        return jsonify({'message': 'Registration successful. Please check your email to activate your account, then wait for admin approval.'}), 201
     except sqlite3.IntegrityError:
         conn.close()
         return jsonify({'error': 'Registration could not be completed. Please try a different username or email.'}), 400
     except Exception as e:
         conn.close()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/captcha', methods=['GET'])
+def get_captcha():
+    captcha_id, code = generate_captcha()
+    return jsonify({'captcha_id': captcha_id, 'question': code}), 200
 
 @app.route('/activate', methods=['GET'])
 def activate():
@@ -647,15 +721,15 @@ def activate():
             </div>
             """, 200
 
-        c.execute('UPDATE users SET is_active = 1 WHERE id = ?', (user_id,))
+        c.execute('UPDATE users SET is_active = 1, account_status = ? WHERE id = ?', ('pending', user_id))
         conn.commit()
-        logger.info(f"User ID {user_id} activated successfully")
+        logger.info(f"User ID {user_id} activated successfully - pending admin approval")
         conn.close()
 
         return f"""
         <div style="text-align:center; padding:50px; font-family:Arial;">
             <h1 style="color:green;">Account Activated Successfully!</h1>
-            <p>You can now log in to Forensic Tool.</p>
+            <p>Your email has been verified. Please wait for admin to approve your account before logging in.</p>
             <a href="{frontend_url}/login" style="color:#1a73e8; font-size:18px;">Go to Login -></a>
         </div>
         """, 200
@@ -740,19 +814,51 @@ def reset_password():
         user_id = decoded['user_id']
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
-        c.execute('SELECT password FROM users WHERE id = ?', (user_id,))
-        old_password_hash = c.fetchone()
+        c.execute('SELECT password, password_history FROM users WHERE id = ?', (user_id,))
+        row = c.fetchone()
         
-        if not old_password_hash:
+        if not row:
             conn.close()
             return jsonify({'error': 'User not found'}), 404
 
-        if checkpw(new_password.encode('utf-8'), old_password_hash[0]):
-            conn.close()
-            return jsonify({'error': 'New password cannot be the same as your old password.'}), 400
+        old_password_hash, password_history = row[0], row[1]
+        
+        # Ensure password hash is bytes
+        if isinstance(old_password_hash, str):
+            old_password_hash = old_password_hash.encode('utf-8')
+            
+        # Check if new password matches any in history
+        if password_history:
+            try:
+                history_list = json.loads(password_history)
+                for old_hash in history_list:
+                    if isinstance(old_hash, str):
+                        old_hash = old_hash.encode('utf-8')
+                    if checkpw(new_password.encode('utf-8'), old_hash):
+                        conn.close()
+                        return jsonify({'error': 'New password cannot be any of your last 5 passwords.'}), 400
+            except:
+                pass
 
-        hashed = hashpw(new_password.encode('utf-8'), gensalt())
-        c.execute('UPDATE users SET password = ? WHERE id = ?', (hashed, user_id))
+        # Hash new password and update history
+        new_hash = hashpw(new_password.encode('utf-8'), gensalt())
+        
+        # Update password history
+        if password_history:
+            try:
+                history_list = json.loads(password_history)
+                history_list.append(new_hash.decode('utf-8'))
+                # Keep only last N passwords
+                history_list = history_list[-PASSWORD_HISTORY_SIZE:]
+            except:
+                history_list = [new_hash.decode('utf-8')]
+        else:
+            history_list = [new_hash.decode('utf-8')]
+        
+        new_history_json = json.dumps(history_list)
+        
+        c.execute('UPDATE users SET password = ?, password_history = ?, last_password_change = ? WHERE id = ?', 
+                  (new_hash, new_history_json, datetime.now().isoformat(), user_id))
         conn.commit()
         conn.close()
         
@@ -769,51 +875,104 @@ def login():
     data = request.get_json()
     username = data.get('username', '')
     password = data.get('password', '')
+    client_ip = request.remote_addr
 
     # Input type validation -- prevents operator-based injection payloads
     if not isinstance(username, str) or not isinstance(password, str):
         return jsonify({'error': 'Invalid input format'}), 400
 
     if not username or not password:
+        log_audit(0, "login_failed", "Empty credentials")
         return jsonify({'error': 'Username and password required'}), 400
 
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('SELECT id, password, is_active FROM users WHERE username = ?', (username,))
+    c.execute('SELECT id, password, is_active, is_admin, account_status, failed_attempts, lockout_until FROM users WHERE username = ?', (username,))
     user = c.fetchone()
-    conn.close()
 
     if not user:
         log_audit(0, "login_failed", f"User not found: {username}")
         return jsonify({'error': 'Invalid username or password'}), 401
 
-    if not checkpw(password.encode('utf-8'), user[1]):
-        log_audit(user[0], "login_failed", "Incorrect password")
+    user_id, stored_hash, is_active, is_admin, account_status, failed_attempts, lockout_until = user[0], user[1], user[2], user[3], user[4] if len(user) > 4 else 'active', user[5] if len(user) > 5 else 0, user[6] if len(user) > 6 else None
+
+    # Check if account is locked due to too many failed attempts
+    if lockout_until:
+        try:
+            lockout_time = datetime.fromisoformat(lockout_until)
+            if lockout_time > datetime.now():
+                remaining_seconds = int((lockout_time - datetime.now()).total_seconds())
+                log_audit(user_id, "login_blocked", f"Account locked, {remaining_seconds}s remaining")
+                return jsonify({'error': f'Too many failed attempts. Try again in {remaining_seconds} seconds.'}), 403
+            else:
+                # Lockout expired, reset failed attempts
+                c.execute('UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE id = ?', (user_id,))
+                conn.commit()
+        except:
+            pass
+
+    # Ensure password hash is bytes
+    hashed_pw = stored_hash
+    if isinstance(hashed_pw, str):
+        hashed_pw = hashed_pw.encode('utf-8')
+
+    if not checkpw(password.encode('utf-8'), hashed_pw):
+        # Increment failed attempts
+        new_failed_attempts = (failed_attempts or 0) + 1
+        
+        if new_failed_attempts >= 5:
+            # Lock account for 15 minutes
+            lockout_duration = 15 * 60  # 15 minutes in seconds
+            lockout_until = (datetime.now() + timedelta(seconds=lockout_duration)).isoformat()
+            c.execute('UPDATE users SET failed_attempts = ?, lockout_until = ? WHERE id = ?', 
+                     (new_failed_attempts, lockout_until, user_id))
+            conn.commit()
+            conn.close()
+            log_audit(user_id, "login_failed", f"Account locked after {new_failed_attempts} attempts")
+            return jsonify({'error': 'Too many failed attempts. Account locked for 15 minutes.'}), 403
+        else:
+            c.execute('UPDATE users SET failed_attempts = ? WHERE id = ?', (new_failed_attempts, user_id))
+            conn.commit()
+            conn.close()
+            log_audit(user_id, "login_failed", f"Incorrect password, attempt {new_failed_attempts}/5")
         return jsonify({'error': 'Invalid username or password'}), 401
 
-    if user[2] == 0:
-        log_audit(user[0], "login_failed", "Account not activated")
+    # Password correct - reset failed attempts
+    c.execute('UPDATE users SET failed_attempts = 0, lockout_until = NULL, last_login = ?, last_login_ip = ? WHERE id = ?', 
+              (datetime.now().isoformat(), client_ip, user_id))
+    conn.commit()
+    conn.close()
+
+    if is_active == 0:
+        log_audit(user_id, "login_failed", "Account not activated")
         return jsonify({'error': 'Account not activated. Please check your email for activation link.'}), 403
 
+    # Check account status for approval requirement
+    if account_status == 'pending':
+        log_audit(user_id, "login_failed", "Account pending admin approval")
+        return jsonify({'error': 'Your account is pending approval. Please wait for admin to approve your registration.'}), 403
+    elif account_status == 'suspended':
+        log_audit(user_id, "login_failed", "Account suspended")
+        return jsonify({'error': 'Your account has been suspended. Contact admin for assistance.'}), 403
+
+    # Generate JWT token with expiration
+    token_expiry = datetime.now() + timedelta(hours=SESSION_TIMEOUT_HOURS)
     token = jwt.encode({
-        'user_id': user[0],
-        'exp': datetime.now(timezone.utc) + timedelta(hours=24)
-    }, app.config['SECRET_KEY'])
+        'user_id': user_id,
+        'username': username,
+        'is_admin': is_admin,
+        'exp': token_expiry
+    }, app.config['SECRET_KEY'], algorithm='HS256')
 
-    log_audit(user[0], "login_success", "User logged in")
+    log_audit(user_id, "login_success", f"IP: {client_ip}")
 
-    response = make_response(jsonify({'token': token, 'user_id': user[0]}), 200)
-    is_production = os.getenv('FLASK_ENV') != 'development'
-    response.set_cookie(
-        'token',
-        token,
-        httponly=True,
-        secure=is_production,
-        samesite='Lax',
-        max_age=86400,
-        path='/'
-    )
-    return response
+    return jsonify({
+        'token': token,
+        'user_id': user_id,
+        'username': username,
+        'is_admin': is_admin,
+        'expires_in': SESSION_TIMEOUT_HOURS * 3600
+    }), 200
 
 @app.route('/search-x-posts', methods=['POST'])
 @token_required
@@ -821,11 +980,43 @@ def login():
 def search_x_posts(current_user):
     data = request.get_json()
     query = data.get('query')
+    exact_match = data.get('exact_match', False)
+
     if not query:
         return jsonify({"error": "Search query is required"}), 400
 
-    # Force query to be quoted as exact phrase to avoid & and other char parsing issues
-    safe_query = f'"{query}"' if not (query.startswith('"') and query.endswith('"')) else query
+    # Clean the query for X API compatibility
+    # Remove characters that break X search syntax
+    import re
+    cleaned = query.strip()
+    # Remove URLs (they cause search issues)
+    cleaned = re.sub(r'https?://\S+', '', cleaned)
+    # Remove special X search operators that could cause issues
+    cleaned = re.sub(r'[&|!(){}[\]"\\]', ' ', cleaned)
+    # Collapse multiple spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    if not cleaned:
+        return jsonify({"error": "Search query is empty after cleaning"}), 400
+
+    if exact_match:
+        # For exact match: use first few distinctive words as search, then filter
+        words = cleaned.split()
+        search_terms = ' '.join(words[:5])
+        safe_query = search_terms
+        max_results = 100
+    else:
+        # For general search: use the cleaned query as keywords (NO forced quotes)
+        # This allows partial and fuzzy matching
+        words = cleaned.split()
+        if len(words) > 8:
+            # For long queries, use first 8 words to stay within X limits
+            safe_query = ' '.join(words[:8])
+        else:
+            safe_query = cleaned
+        max_results = 10
+
+    logger.info(f"X search - original: '{query[:80]}' | cleaned: '{safe_query[:80]}' | exact_match: {exact_match}")
 
     search_url = (
         f"https://api.x.com/2/tweets/search/recent?"
@@ -833,15 +1024,40 @@ def search_x_posts(current_user):
         f"&tweet.fields=created_at,author_id,text,conversation_id,entities,public_metrics"
         f"&expansions=author_id"
         f"&user.fields=username"
-        f"&max_results=10"
+        f"&max_results={max_results}"
     )
 
     response = requests.get(search_url, headers=headers)
+
     if response.status_code != 200:
         logger.error(f"X search failed: {response.status_code} - {response.text}")
-        return jsonify({"error": "X search failed", "details": response.text}), response.status_code
+        error_detail = response.text
+        # Provide user-friendly error messages
+        if response.status_code == 403:
+            return jsonify({"error": "X API access denied. Your API plan may not include search. Check your X Developer Portal."}), 403
+        elif response.status_code == 429:
+            return jsonify({"error": "X API rate limit reached. Please wait a few minutes before searching again."}), 429
+        return jsonify({"error": "X search failed", "details": error_detail}), response.status_code
 
     results = response.json()
+    logger.info(f"X search response: result_count={results.get('meta', {}).get('result_count', 0)}")
+
+    # If exact_match is True, filter results to find the exact content
+    if exact_match and 'data' in results:
+        exact_posts = []
+        for tweet in results['data']:
+            if tweet.get('text', '') == query:
+                exact_posts.append(tweet)
+
+        if exact_posts:
+            results['data'] = exact_posts
+            results['meta']['result_count'] = len(exact_posts)
+            logger.info(f"Found {len(exact_posts)} exact matches out of {len(results.get('data', []))} total")
+        else:
+            logger.warning(f"No exact match found for: {query[:80]}")
+            results['data'] = []
+            results['meta']['result_count'] = 0
+
     posts = []
     if 'data' in results:
         users = {u['id']: u['username'] for u in results.get('includes', {}).get('users', [])}
@@ -857,7 +1073,7 @@ def search_x_posts(current_user):
                     "replies": metrics.get('reply_count', 0),
                     "likes": metrics.get('like_count', 0),
                     "quotes": metrics.get('quote_count', 0),
-                    "views": metrics.get('impression_count', 0) # Free tier usually 0
+                    "views": metrics.get('impression_count', 0)
                 }
             })
 
@@ -1051,6 +1267,12 @@ def store_evidence_endpoint(current_user):
             evidence_data = json.loads(evidence_data)
 
         defamation = evidence_data.get("defamation", {"is_defamatory": False, "confidence": 0.0})
+        
+        valid_categories = ["Safe", "Defamatory", "Hate Speech"]
+        defamation_category = defamation.get("category", "Safe")
+        if defamation_category not in valid_categories:
+            defamation_category = "Safe"
+        defamation["category"] = defamation_category
 
         evidence_for_blockchain = {
             "post_id": evidence_data.get("id", "0"),
@@ -1384,41 +1606,116 @@ def report(current_user, user_id):
     if str(current_user) != str(user_id):
         return jsonify({'error': f'Unauthorized access (ID mismatch: {current_user} != {user_id})'}), 403
 
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    category = request.args.get('category', 'all')
+    action_type = request.args.get('action_type', 'all')
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
 
-    c.execute('SELECT id, post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
-    fetched = [{
-        'id': r[0],
-        'post_id': r[1],
-        'content': decrypt_field(r[2]),
-        'author_username': decrypt_field(r[3]),
-        'created_at': r[4],
-        'media_urls': json.loads(decrypt_field(r[5])),
-        'timestamp': r[6],
-        'verified': r[7]
-    } for r in c.fetchall()]
+    base_query = 'SELECT id, post_id, content, author_username, created_at, media_urls, timestamp, verified, category, confidence FROM fetched_evidence WHERE user_id = ?'
+    params = [user_id]
 
-    c.execute('''
-        SELECT s.id, s.evidence_id, s.tx_hash, s.eth_tx_hash, s.timestamp, 
-               f.content, f.author_username, f.category, f.confidence
+    if start_date:
+        if '/' in start_date:
+            parts = start_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            start_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        base_query += ' AND timestamp >= ?'
+        params.append(f"{start_date}T00:00:00")
+    if end_date:
+        if '/' in end_date:
+            parts = end_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            end_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        base_query += ' AND timestamp <= ?'
+        params.append(f"{end_date}T23:59:59")
+
+    if category == 'Safe':
+        base_query += ' AND (category IS NULL OR category = "Safe" OR category = "")'
+    elif category and category != 'all':
+        base_query += ' AND category = ?'
+        params.append(category)
+
+    if action_type == 'stored':
+        base_query += ' AND verified = 1'
+    elif action_type == 'fetched':
+        base_query += ' AND (verified = 2 OR verified = 0)'
+
+    c.execute(base_query, params)
+    fetched = []
+    for r in c.fetchall():
+        try:
+            content = decrypt_field(r[2])
+            author = decrypt_field(r[3])
+            media = json.loads(decrypt_field(r[5])) if r[5] else []
+        except:
+            content = ''
+            author = ''
+            media = []
+        fetched.append({
+            'id': r[0],
+            'post_id': r[1],
+            'content': content,
+            'author_username': author,
+            'created_at': r[4],
+            'media_urls': media,
+            'timestamp': r[6],
+            'verified': r[7],
+            'category': r[8] if r[8] else 'Pending',
+            'confidence': r[9] if r[9] else 0.0
+        })
+
+    stored_query = '''
+        SELECT s.id, s.evidence_id, s.tx_hash, s.eth_tx_hash, s.timestamp, s.post_id,
+               f.content, f.author_username, f.category, f.confidence, f.engagement
         FROM stored_evidence s
         LEFT JOIN fetched_evidence f ON s.post_id = f.post_id
         WHERE s.user_id = ?
-    ''', (user_id,))
-    stored = [{
-        'id': r[0],
-        'evidence_id': r[1],
-        'tx_hash': r[2],
-        'eth_tx_hash': r[3],
-        'timestamp': r[4],
-        'content': decrypt_field(r[5]) if r[5] else 'N/A',
-        'author_username': decrypt_field(r[6]) if r[6] else 'N/A',
-        'category': r[7] if r[7] else 'N/A',
-        'confidence': r[8] if r[8] else 0.0
-    } for r in c.fetchall()]
+    '''
+    stored_params = [user_id]
+
+    if start_date:
+        stored_query += ' AND s.timestamp >= ?'
+        stored_params.append(f"{start_date}T00:00:00")
+    if end_date:
+        stored_query += ' AND s.timestamp <= ?'
+        stored_params.append(f"{end_date}T23:59:59")
+    if category == 'Safe':
+        stored_query += ' AND (f.category IS NULL OR f.category = "Safe" OR f.category = "Pending" OR f.category = "")'
+    elif category and category != 'all':
+        stored_query += ' AND f.category = ?'
+        stored_params.append(category)
+
+    c.execute(stored_query, stored_params)
+    stored = []
+    for r in c.fetchall():
+        try:
+            content = decrypt_field(r[6]) if r[6] else ''
+            author = decrypt_field(r[7]) if r[7] else ''
+            engagement = json.loads(decrypt_field(r[10])) if r[10] else {}
+        except:
+            content = ''
+            author = ''
+            engagement = {}
+        stored.append({
+            'id': r[0],
+            'evidence_id': r[1],
+            'tx_hash': r[2],
+            'eth_tx_hash': r[3],
+            'timestamp': r[4],
+            'post_id': r[5],
+            'content': content,
+            'author_username': author,
+            'category': r[8] if r[8] else 'Pending',
+            'confidence': r[9] if r[9] else 0.0,
+            'engagement': engagement
+        })
 
     conn.close()
 
@@ -1529,43 +1826,102 @@ def generate_report(current_user, user_id):
     if str(current_user) != str(user_id):
         return jsonify({'error': f'Unauthorized access (ID mismatch: {current_user} != {user_id})'}), 403
 
-    # Get chart data from frontend
     data = request.get_json() or {}
     charts = data.get('charts', {})
     chart_activity = charts.get('weekly', '')
     chart_daily = charts.get('daily', '')
     chart_harm = charts.get('harm', '')
+    filters = data.get('filters', {})
+    extended = data.get('extended', False)
+    max_fetched = 10000 if extended else 1000
+    max_stored = 5000 if extended else 500
+
+    start_date = filters.get('start_date')
+    end_date = filters.get('end_date')
+    category = filters.get('category', 'all')
+    action_type = filters.get('action_type', 'all')
 
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
 
-    c.execute('SELECT post_id, content, author_username, created_at, media_urls, timestamp, verified FROM fetched_evidence WHERE user_id = ?', (user_id,))
+    base_query = 'SELECT post_id, content, author_username, created_at, media_urls, timestamp, verified, category, confidence FROM fetched_evidence WHERE user_id = ?'
+    params = [user_id]
+
+    if start_date:
+        if '/' in start_date:
+            parts = start_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            start_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        base_query += ' AND timestamp >= ?'
+        params.append(f"{start_date}T00:00:00")
+    if end_date:
+        if '/' in end_date:
+            parts = end_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            end_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        base_query += ' AND timestamp <= ?'
+        params.append(f"{end_date}T23:59:59")
+
+    if category == 'Safe':
+        base_query += ' AND (category IS NULL OR category = "Safe" OR category = "")'
+    elif category and category != 'all':
+        base_query += ' AND category = ?'
+        params.append(category)
+
+    if action_type == 'stored':
+        base_query += ' AND verified = 1'
+    elif action_type == 'fetched':
+        base_query += ' AND (verified = 2 OR verified = 0)'
+
+    c.execute(base_query, params)
     fetched = c.fetchall()
-    
-    # Decrypt fetched data for report
+
     decrypted_fetched = []
     for r in fetched:
+        try:
+            content = decrypt_field(r[1])
+            author = decrypt_field(r[2])
+            media = json.loads(decrypt_field(r[4])) if r[4] else []
+        except:
+            content = ''
+            author = ''
+            media = []
         decrypted_fetched.append((
-            r[0], # post_id
-            decrypt_field(r[1]), # content
-            decrypt_field(r[2]), # author_username
-            r[3], # created_at
-            json.loads(decrypt_field(r[4])) if r[4] else [], # media_urls
-            r[5], # timestamp
-            r[6]  # verified
+            r[0], content, author, r[3], media, r[5], r[6], r[7] or 'Pending', r[8] or 0.0
         ))
     fetched = decrypted_fetched
 
-    c.execute('SELECT evidence_id, tx_hash, eth_tx_hash, timestamp FROM stored_evidence WHERE user_id = ?', (user_id,))
+    stored_query = 'SELECT s.evidence_id, s.tx_hash, s.eth_tx_hash, s.timestamp, s.post_id, f.content, f.author_username, f.category, f.confidence FROM stored_evidence s LEFT JOIN fetched_evidence f ON s.post_id = f.post_id WHERE s.user_id = ?'
+    stored_params = [user_id]
+
+    if start_date:
+        stored_query += ' AND s.timestamp >= ?'
+        stored_params.append(f"{start_date}T00:00:00")
+    if end_date:
+        stored_query += ' AND s.timestamp <= ?'
+        stored_params.append(f"{end_date}T23:59:59")
+
+    c.execute(stored_query, stored_params)
     stored = c.fetchall()
 
-    # Use current time for the report header
-    now = datetime.now()
+    decrypted_stored = []
+    for r in stored:
+        try:
+            content = decrypt_field(r[5]) if r[5] else ''
+            author = decrypt_field(r[6]) if r[6] else ''
+        except:
+            content = ''
+            author = ''
+        decrypted_stored.append((r[0], r[1], r[2], r[3], r[4], content, author, r[7] or 'Pending', r[8] or 0.0))
+    stored = decrypted_stored
 
+    now = datetime.now()
     conn.close()
-    
+
     log_audit(current_user, "generate_report", f"User: {user_id}")
 
     html_content = f"""
@@ -1590,32 +1946,48 @@ def generate_report(current_user, user_id):
     <body>
         <div class="header">
             <h1>Forensic Evidence Dossier</h1>
-            <p>Verified Audit Report for Client Access</p>
+            <p>{report_subject}</p>
             <div class="metadata">
-                Investigator: <strong>{username}</strong> | Date Generated: {now.strftime('%Y-%m-%d %H:%M:%S')}
+                Date Generated: {now.strftime('%Y-%m-%d %H:%M:%S')}
             </div>
         </div>
 
-        <h2>Forensic Analytics</h2>
-        <div class="charts-container">
-            {f'<div class="chart-box"><h3>7-Day Activity</h3><img class="chart-img" src="data:image/png;base64,{chart_activity}" /></div>' if chart_activity else ''}
-            <div class="chart-box"><h3>Daily Fetches</h3><img class="chart-img" src="data:image/png;base64,{chart_daily}" /></div>
-            {f'<div class="chart-box"><h3>Harm Assessment</h3><img class="chart-img" src="data:image/png;base64,{chart_harm}" /></div>' if chart_harm else ''}
+        <div class="filters">
+            <span class="filter-tag">Category: {category}</span>
+            <span class="filter-tag">Action: {action_type}</span>
+            {f'<span class="filter-tag">From: {start_date}</span>' if start_date else ''}
+            {f'<span class="filter-tag">To: {end_date}</span>' if end_date else ''}
         </div>
 
-        <h2>Captured Evidence Intelligence</h2>
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-value">{len(fetched)}</div><div class="stat-label">Scans</div></div>
+            <div class="stat-card"><div class="stat-value">{len(stored)}</div><div class="stat-label">Stored</div></div>
+            <div class="stat-card"><div class="stat-value">{defamatory_count + hate_count}</div><div class="stat-label">Flagged</div></div>
+            <div class="stat-card"><div class="stat-value">{safe_count}</div><div class="stat-label">Safe</div></div>
+        </div>
+
+        {(f'''<h2>Forensic Analytics</h2>
+        <div class="charts-container">
+            {f'<div class="chart-box"><h3>7-Day Activity</h3><img class="chart-img" src="data:image/png;base64,{chart_activity}" /></div>' if chart_activity else ''}
+            {f'<div class="chart-box"><h3>Daily Fetches</h3><img class="chart-img" src="data:image/png;base64,{chart_daily}" /></div>' if chart_daily else ''}
+            {f'<div class="chart-box"><h3>Harm Assessment</h3><img class="chart-img" src="data:image/png;base64,{chart_harm}" /></div>' if chart_harm else ''}
+        </div>''') if chart_activity or chart_daily or chart_harm else ''}
+
+        <h2>Captured Evidence Intelligence ({len(fetched)})</h2>
         {''.join([
             f"<div class='evidence'>"
             f"<p><strong>Network Post ID:</strong> {r[0]}</p>"
-            f"<p><strong>Extracted Content:</strong> <i style='color: #444;'>\"{r[1]}\"</i></p>"
+            f"<p><strong>Extracted Content:</strong> <i style='color: #444;'>{r[1]}</i></p>"
             f"<p><strong>Subject Handle:</strong> @{r[2]}</p>"
             f"<p><strong>Post Timestamp:</strong> {r[3]}</p>"
+            f"<p><strong>Category:</strong> {r[7]}</p>"
+            f"<p><strong>AI Confidence:</strong> {r[8]:.2%}</p>"
             f"<p><strong>System Log Time:</strong> {r[5]}</p>"
             f"<p><strong>Integrity Status:</strong> "
             f"<span class='{ 'verified' if r[6]==1 else 'not-verified' if r[6]==0 else 'skipped' }'>"
             f"{ 'Verified: Cryptographically Matches' if r[6]==1 else 'Alert: Potential Hash Mismatch' if r[6]==0 else 'Pending Verification' }</span></p>"
             "</div>"
-            for r in fetched
+            for r in fetched[:max_fetched]
         ])}
 
         <h2>Immutable Blockchain Anchor Log</h2>
@@ -1623,19 +1995,26 @@ def generate_report(current_user, user_id):
             f"<div class='evidence'><p><strong>Evidence Vault UID:</strong> {r[0]}</p>"
             f"<p><strong>Internal Storage Hash:</strong> <code style='font-size: 10px;'>{r[1]}</code></p>"
             f"<p><strong>Ethereum On-Chain Hash (Sepolia):</strong> <code style='font-size: 10px;'>{r[2]}</code></p>"
+            f"<p><strong>Content:</strong> <i>{r[5]}</i></p>"
+            f"<p><strong>Author:</strong> @{r[6]}</p>"
+            f"<p><strong>Category:</strong> {r[7]}</p>"
             f"<p><strong>Anchored At:</strong> {r[3]}</p></div>"
-            for r in stored
+            for r in stored[:max_stored]
         ])}
 
         <div class="footer">
-            <p>This document contains cryptographically secured forensic evidence from ChainForensix.<br/> 
+            <p>This document contains cryptographically secured forensic evidence from ChainForensix.<br/>
             Any alteration to the digital content will invalidate the on-chain anchor.</p>
         </div>
     </body>
     </html>
     """
 
-    pdf = pdfkit.from_string(html_content, False)
+    try:
+        pdf = generate_pdf(html_content)
+    except Exception as e:
+        return jsonify({'error': 'PDF generation failed', 'details': str(e)}), 500
+
     response = make_response(pdf)
     response.headers['Content-Type'] = 'application/pdf'
     response.headers['Content-Disposition'] = f'attachment; filename=forensic_report_{user_id}.pdf'
@@ -2030,6 +2409,622 @@ def logout():
     response.delete_cookie('token', path='/')
     return response
 
+# Create default admin user if not exists
+def create_admin_user():
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    
+    # Check if admin user already exists
+    c.execute('SELECT id FROM users WHERE is_admin = 1')
+    admin_exists = c.fetchone()
+    
+    if not admin_exists:
+        # Create admin user
+        admin_password = 'admin123'
+        hashed_password = hashpw(admin_password.encode('utf-8'), gensalt())
+        
+        c.execute('''
+            INSERT INTO users (username, password, email, is_active, is_admin, created_at) 
+            VALUES (?, ?, ?, 1, 1, ?)
+        ''', ('admin', hashed_password.decode('utf-8'), 'admin@forensix.local', datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        print('Created admin user: admin / admin123')
+        return True
+    else:
+        conn.close()
+        print('Admin user already exists - proceeding with existing user')
+        return True
+
+@app.route('/admin/stats', methods=['GET'])
+@token_required
+def admin_report_stats(current_user):
+    # Check if admin
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT is_admin FROM users WHERE id = ?', (current_user,))
+    is_admin = c.fetchone()[0]
+    conn.close()
+    if not is_admin:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT COUNT(*) FROM users')
+    total_users = c.fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM fetched_evidence')
+    total_scans = c.fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM stored_evidence')
+    total_secured = c.fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM audit_logs')
+    total_logs = c.fetchone()[0]
+    conn.close()
+    
+    return jsonify({
+        'total_users': total_users,
+        'total_scans': total_scans,
+        'total_secured': total_secured,
+        'total_logs': total_logs
+    })
+
+@app.route('/admin/ai-stats', methods=['GET'])
+@token_required
+def admin_ai_stats(current_user):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    # Check if admin
+    c.execute('SELECT is_admin FROM users WHERE id = ?', (current_user,))
+    if not c.fetchone()[0]:
+        conn.close()
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    c.execute('SELECT category, COUNT(*) FROM fetched_evidence GROUP BY category')
+    rows = c.fetchall()
+    conn.close()
+    
+    stats = {
+        'Safe': 0,
+        'Defamatory': 0,
+        'Hate Speech': 0
+    }
+    for r in rows:
+        if r[0] in stats:
+            stats[r[0]] = r[1]
+        elif r[0] is None:
+            stats['Safe'] += r[1]
+            
+    return jsonify(stats)
+
+@app.route('/admin/users/pending', methods=['GET'])
+@token_required
+def admin_pending_users(current_user):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT id, username, email, created_at FROM users WHERE is_active = 0')
+    rows = c.fetchall()
+    conn.close()
+    return jsonify({'users': [{'id': r[0], 'username': r[1], 'email': r[2], 'created_at': r[3]} for r in rows]})
+
+@app.route('/admin/registration-status', methods=['GET'])
+def admin_reg_status():
+    return jsonify({'enabled': True})
+
+@app.route('/admin/users', methods=['GET'])
+@token_required
+def admin_get_users(current_user):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT id, username, email, is_active, is_admin, account_status, failed_attempts, lockout_until, last_login, last_login_ip FROM users WHERE is_admin = 0')
+    rows = c.fetchall()
+    conn.close()
+    return jsonify({'users': [
+        {'id': r[0], 'username': r[1], 'email': r[2], 'is_active': r[3], 'is_admin': r[4], 
+         'account_status': r[5], 'failed_attempts': r[6], 'lockout_until': r[7], 'last_login': r[8], 'last_login_ip': r[9]} 
+        for r in rows
+    ]})
+
+@app.route('/admin/unlock-user/<int:user_id>', methods=['POST'])
+@token_required
+def admin_unlock_user(current_user):
+    # Check if admin
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT is_admin FROM users WHERE id = ?', (current_user,))
+    if not c.fetchone()[0]:
+        conn.close()
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Unlock the user
+    c.execute('UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+    log_audit(current_user, "unlock_user", f"Unlocked user {user_id}")
+    return jsonify({'message': 'User unlocked successfully'}), 200
+
+@app.route('/admin/security-stats', methods=['GET'])
+@token_required
+def admin_security_stats(current_user):
+    # Check if admin
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT is_admin FROM users WHERE id = ?', (current_user,))
+    if not c.fetchone()[0]:
+        conn.close()
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    # Get security stats
+    c.execute('SELECT COUNT(*) FROM users WHERE lockout_until IS NOT NULL')
+    locked_count = c.fetchone()[0]
+    
+    c.execute('SELECT COUNT(*) FROM audit_logs WHERE action = "login_failed" AND timestamp > datetime("now", "-24 hours")')
+    failed_logins_24h = c.fetchone()[0]
+    
+    c.execute('SELECT username, failed_attempts, lockout_until FROM users WHERE failed_attempts >= 3')
+    suspicious_users = c.fetchall()
+    
+    c.execute('SELECT u.username, a.action, a.details, a.timestamp FROM audit_logs a JOIN users u ON a.user_id = u.id WHERE a.action LIKE "login_%" ORDER BY a.timestamp DESC LIMIT 20')
+    recent_login_activity = c.fetchall()
+    
+    conn.close()
+    
+    return jsonify({
+        'locked_accounts': locked_count,
+        'failed_logins_24h': failed_logins_24h,
+        'suspicious_users': [{'username': r[0], 'failed_attempts': r[1], 'lockout_until': r[2]} for r in suspicious_users],
+        'recent_activity': [{'username': r[0], 'action': r[1], 'details': r[2], 'timestamp': r[3]} for r in recent_login_activity]
+    }), 200
+
+@app.route('/admin/activities', methods=['GET'])
+@token_required
+def admin_get_activities(current_user):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('''
+        SELECT a.id, u.username, a.action, a.details, a.timestamp 
+        FROM audit_logs a 
+        JOIN users u ON a.user_id = u.id 
+        ORDER BY a.timestamp DESC LIMIT 100
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    return jsonify({'activities': [{'id': r[0], 'username': r[1], 'action': r[2], 'details': r[3], 'timestamp': r[4]} for r in rows]})
+
+@app.route('/admin/report-stats', methods=['GET'])
+@token_required
+def admin_report_stats_preview(current_user):
+    user_id = request.args.get('user_id')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    category = request.args.get('category')
+    action_type = request.args.get('action_type')
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    now = datetime.now()
+
+    base_query = 'SELECT COUNT(*) FROM fetched_evidence WHERE user_id IS NOT NULL'
+    base_params = []
+    if user_id and user_id != 'all':
+        base_query += ' AND user_id = ?'
+        base_params.append(user_id)
+    if start_date:
+        base_query += ' AND timestamp >= ?'
+        base_params.append(f"{start_date}T00:00:00")
+    if end_date:
+        base_query += ' AND timestamp <= ?'
+        base_params.append(f"{end_date}T23:59:59")
+    if category and category != 'all':
+        base_query += ' AND category = ?'
+        base_params.append(category)
+    if action_type == 'stored':
+        base_query += ' AND verified = 1'
+    elif action_type == 'fetched':
+        base_query += ' AND (verified = 2 OR verified = 0)'
+
+    params = list(base_params)
+    c.execute(base_query, params)
+    scanned = c.fetchone()[0]
+
+    params = list(base_params)
+    secured_query = 'SELECT COUNT(*) FROM stored_evidence s LEFT JOIN fetched_evidence f ON s.post_id = f.post_id WHERE s.user_id IS NOT NULL'
+    secured_params = []
+    if user_id and user_id != 'all':
+        secured_query += ' AND s.user_id = ?'
+        secured_params.append(user_id)
+    if start_date:
+        secured_query += ' AND s.timestamp >= ?'
+        secured_params.append(f"{start_date}T00:00:00")
+    if end_date:
+        secured_query += ' AND s.timestamp <= ?'
+        secured_params.append(f"{end_date}T23:59:59")
+    if category and category != 'all':
+        secured_query += ' AND f.category = ?'
+        secured_params.append(category)
+    c.execute(secured_query, secured_params)
+    secured = c.fetchone()[0]
+
+    threat_query = base_query + " AND category IN ('Defamatory', 'Hate Speech')"
+    c.execute(threat_query, base_params)
+    threats = c.fetchone()[0]
+
+    dist_query = base_query.replace('SELECT COUNT(*)', 'SELECT category, COUNT(*)') + ' GROUP BY category'
+    c.execute(dist_query, base_params)
+    rows = c.fetchall()
+
+    dist = {'Safe': 0, 'Defamatory': 0, 'Hate Speech': 0}
+    for r in rows:
+        cat = r[0] or 'Safe'
+        if cat in dist:
+            dist[cat] = r[1]
+
+    # Handle NULL as Pending/Safe (unscanned content)
+    if dist.get('Safe', 0) == 0 and dist.get('Pending', 0) == 0 and dist.get(None, 0) == 0:
+        total_with_category = sum(dist.values())
+        if scanned > total_with_category:
+            dist['Safe'] = scanned - total_with_category
+
+    safe_count = dist.get('Safe', 0) + dist.get('Pending', 0) + dist.get(None, 0)
+    defamatory_count = dist.get('Defamatory', 0)
+    hate_speech_count = dist.get('Hate Speech', 0)
+
+    # Generate trend data for last 7 days
+    trend = []
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    for i in range(6, -1, -1):
+        day_start = today - timedelta(days=i)
+        day_end = day_start + timedelta(days=1) - timedelta(seconds=1)
+        c.execute('SELECT COUNT(*) FROM fetched_evidence WHERE user_id IS NOT NULL AND timestamp >= ? AND timestamp <= ?',
+                  (day_start.isoformat(), day_end.isoformat()))
+        day_scans = c.fetchone()[0]
+        c.execute('SELECT COUNT(*) FROM stored_evidence s WHERE s.timestamp >= ? AND timestamp <= ?',
+                  (day_start.isoformat(), day_end.isoformat()))
+        day_stored = c.fetchone()[0]
+        trend.append({'date': day_start.strftime('%b %d'), 'scanned': day_scans, 'secured': day_stored})
+
+    conn.close()
+    return jsonify({
+        'totals': {'scanned': scanned, 'secured': secured, 'threats': threats},
+        'categories': {'Safe': safe_count, 'Defamatory': defamatory_count, 'Hate Speech': hate_speech_count},
+        'trend': trend
+    })
+
+@app.route('/admin/report/evidence', methods=['GET'])
+@token_required
+def admin_report_evidence(current_user, user_id=None):
+    user_id = request.args.get('user_id')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    category = request.args.get('category')
+    action_type = request.args.get('action_type')
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+
+    # Handle category filter - NULL means unscanned/Pending
+    if category and category == 'Safe':
+        cat_filter = " AND (category IS NULL OR category = 'Safe' OR category = 'Pending')"
+    elif category and category != 'all':
+        cat_filter = " AND category = ?"
+        cat_params = [category]
+    else:
+        cat_filter = ""
+        cat_params = []
+
+    query = 'SELECT post_id, content, author_username, timestamp, category, verified FROM fetched_evidence WHERE user_id IS NOT NULL'
+    params = []
+    if user_id and user_id != 'all':
+        query += ' AND user_id = ?'
+        params.append(user_id)
+
+    # Handle date formats - support DD/MM/YYYY, DD/MM/YY, YYYY-MM-DD
+    if start_date:
+        if '/' in start_date:
+            parts = start_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            start_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        query += ' AND timestamp >= ?'
+        params.append(f"{start_date}T00:00:00")
+    if end_date:
+        if '/' in end_date:
+            parts = end_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            end_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        query += ' AND timestamp <= ?'
+        params.append(f"{end_date}T23:59:59")
+
+    query += cat_filter
+    params.extend(cat_params)
+
+    if action_type == 'stored':
+        query += ' AND verified = 1'
+    elif action_type == 'fetched':
+        query += ' AND (verified = 2 OR verified = 0)'
+
+    query += ' ORDER BY timestamp DESC LIMIT 200'
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+
+    evidence = [{
+        'post_id': r[0],
+        'content': decrypt_field(r[1]),
+        'author_username': decrypt_field(r[2]),
+        'timestamp': r[3],
+        'category': r[4] if r[4] else 'Pending',
+        'verified': r[5]
+    } for r in rows]
+
+    return jsonify({'evidence': evidence})
+
+@app.route('/admin/generate-activity-report', methods=['POST'])
+@token_required
+def admin_gen_act_report(current_user):
+    return admin_generate_activity_report(current_user)
+
+@app.route('/admin/generate-report', methods=['POST'])
+@token_required
+def admin_gen_rep(current_user):
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    filters = data.get('filters', {})
+    stats = data.get('stats', {})
+    charts = data.get('charts', {})
+    extended = data.get('extended', False)
+    max_fetched = 10000 if extended else 1000
+    max_stored = 5000 if extended else 500
+
+    target_user_id = None if user_id == 'all' else user_id
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+
+    if target_user_id:
+        c.execute('SELECT username FROM users WHERE id = ?', (target_user_id,))
+        row = c.fetchone()
+        username = row[0] if row else 'Unknown'
+    else:
+        username = 'All Investigators'
+
+    start_date = filters.get('start_date')
+    end_date = filters.get('end_date')
+    category = filters.get('category', 'all')
+    action_type = filters.get('action_type', 'all')
+
+    base_query = 'SELECT post_id, content, author_username, timestamp, category, verified FROM fetched_evidence WHERE user_id IS NOT NULL'
+    params = []
+
+    if target_user_id:
+        base_query += ' AND user_id = ?'
+        params.append(target_user_id)
+
+    if start_date:
+        if '/' in start_date:
+            parts = start_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            start_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        base_query += ' AND timestamp >= ?'
+        params.append(f"{start_date}T00:00:00")
+    if end_date:
+        if '/' in end_date:
+            parts = end_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            end_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        base_query += ' AND timestamp <= ?'
+        params.append(f"{end_date}T23:59:59")
+
+    if category == 'Safe':
+        base_query += ' AND (category IS NULL OR category = "Safe" OR category = "")'
+    elif category and category != 'all':
+        base_query += ' AND category = ?'
+        params.append(category)
+
+    if action_type == 'stored':
+        base_query += ' AND verified = 1'
+    elif action_type == 'fetched':
+        base_query += ' AND (verified = 2 OR verified = 0)'
+
+    c.execute(base_query, params)
+    fetched_rows = c.fetchall()
+    fetched = []
+    for r in fetched_rows:
+        try:
+            fetched.append((r[0], decrypt_field(r[1]), decrypt_field(r[2]), r[3], r[4], r[5]))
+        except:
+            fetched.append((r[0], '', '', r[3], r[4], r[5]))
+
+    stored_query = 'SELECT s.evidence_id, s.tx_hash, s.eth_tx_hash, s.timestamp FROM stored_evidence s WHERE s.user_id IS NOT NULL'
+    stored_params = []
+    if target_user_id:
+        stored_query += ' AND s.user_id = ?'
+        stored_params.append(target_user_id)
+    if start_date:
+        stored_query += ' AND s.timestamp >= ?'
+        stored_params.append(f"{start_date}T00:00:00")
+    if end_date:
+        stored_query += ' AND s.timestamp <= ?'
+        stored_params.append(f"{end_date}T23:59:59")
+    if action_type == 'stored':
+        pass
+
+    c.execute(stored_query, stored_params)
+    stored_rows = c.fetchall()
+    stored = [(r[0], r[1], r[2], r[3], '', '') for r in stored_rows]
+
+    conn.close()
+
+    now = datetime.now()
+    safe_count = sum(1 for r in fetched if r[4] == 'Safe' or not r[4])
+    defamatory_count = sum(1 for r in fetched if r[4] == 'Defamatory')
+    hate_count = sum(1 for r in fetched if r[4] == 'Hate Speech')
+    report_subject = f'Filtered Report for {username}' if target_user_id else 'Report for all investigators'
+
+    chart_activity = charts.get('weekly', '')
+    chart_daily = charts.get('daily', '')
+    chart_harm = charts.get('harm', '')
+
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #333; line-height: 1.6; max-width: 800px; margin: auto; }
+        .header { text-align: center; border-bottom: 2px solid #1a73e8; padding-bottom: 20px; margin-bottom: 30px; }
+        h1 { color: #1a73e8; margin-bottom: 5px; }
+        .metadata { color: #666; font-size: 12px; margin-bottom: 20px; }
+        h2 { color: #1a73e8; border-left: 5px solid #1a73e8; padding-left: 10px; margin-top: 40px; }
+        .evidence { border: 1px solid #eee; padding: 15px; margin: 15px 0; border-radius: 8px; background: #fafafa; page-break-inside: avoid; }
+        .verified { color: #10b981; font-weight: bold; }
+        .not-verified { color: #ef4444; font-weight: bold; }
+        .skipped { color: #94a3b8; }
+        .charts-container { display: flex; flex-wrap: wrap; justify-content: space-around; margin-top: 30px; }
+        .chart-box { width: 45%; text-align: center; margin-bottom: 20px; page-break-inside: avoid; }
+        .chart-img { width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+        .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }
+        .stat-card { background: #f5f5f5; border-radius: 8px; padding: 15px; text-align: center; border-left: 3px solid #1a73e8; }
+        .stat-value { font-size: 24px; font-weight: 700; color: #1a73e8; }
+        .stat-label { font-size: 10px; text-transform: uppercase; color: #666; margin-top: 5px; }
+        .filters { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .filter-tag { background: #ddd; padding: 4px 10px; border-radius: 15px; font-size: 11px; margin-right: 8px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Forensic Evidence Report</h1>
+        <p>Generated """ + now.strftime('%Y-%m-%d at %H:%M:%S') + """</p>
+    </div>
+    <p style="color:#666;margin-bottom:20px;">""" + report_subject + """</p>
+    <div class="filters">
+        <span class="filter-tag">Category: """ + category + """</span>
+        <span class="filter-tag">Action: """ + action_type + """</span>
+        """ + (f'<span class="filter-tag">From: {start_date}</span>' if start_date else '') + """
+        """ + (f'<span class="filter-tag">To: {end_date}</span>' if end_date else '') + """
+    </div>
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value">""" + str(len(fetched)) + """</div><div class="stat-label">Scans</div></div>
+        <div class="stat-card"><div class="stat-value">""" + str(len(stored)) + """</div><div class="stat-label">Stored</div></div>
+        <div class="stat-card"><div class="stat-value">""" + str(defamatory_count + hate_count) + """</div><div class="stat-label">Flagged</div></div>
+        <div class="stat-card"><div class="stat-value">""" + str(safe_count) + """</div><div class="stat-label">Safe</div></div>
+    </div>
+    """ + (f'''<h2>Forensic Analytics</h2>
+    <div class="charts-container">
+        {f'<div class="chart-box"><h3>7-Day Activity</h3><img class="chart-img" src="data:image/png;base64,{chart_activity}" /></div>' if chart_activity else ''}
+        {f'<div class="chart-box"><h3>Daily Fetches</h3><img class="chart-img" src="data:image/png;base64,{chart_daily}" /></div>' if chart_daily else ''}
+        {f'<div class="chart-box"><h3>Harm Assessment</h3><img class="chart-img" src="data:image/png;base64,{chart_harm}" /></div>' if chart_harm else ''}
+    </div>''' if chart_activity or chart_daily or chart_harm else '') + """
+    <h2>Captured Evidence Intelligence (""" + str(len(fetched)) + """)</h2>
+    """ + ''.join([f"<div class='evidence'><p><strong>Network Post ID:</strong> {r[0]}</p><p><strong>Content:</strong> {r[1]}</p><p><strong>Author:</strong> @{r[2]}</p><p><strong>Timestamp:</strong> {r[3]}</p></div>" for r in fetched[:max_fetched]]) if fetched else '<p>No evidence found.</p>' + """
+    <h2>Immutable Blockchain Anchor Log</h2>
+    """ + ''.join([f"<div class='evidence'><p><strong>Evidence ID:</strong> {r[0]}</p><p><strong>TX Hash:</strong> {r[1]}</p><p><strong>Ethereum:</strong> <a href='https://sepolia.etherscan.io/tx/{r[2]}'>{r[2]}</a></p><p><strong>Saved:</strong> {r[3]}</p></div>" for r in stored[:max_stored]]) if stored else '<p>No stored records.</p>' + """
+    <div class="footer">
+        <p>© """ + str(now.year) + """ ChainForensix - Forensic Evidence Report</p>
+    </div>
+</body>
+</html>"""
+
+    try:
+        pdf = generate_pdf(html)
+    except Exception as e:
+        return jsonify({'error': 'PDF generation failed', 'details': str(e)}), 500
+
+    response = make_response(pdf)
+    response.headers['Content-Type'] = 'application/pdf'
+    filename = f"report_{username}_{now.strftime('%Y%m%d')}.pdf"
+    response.headers['Content-Disposition'] = f'attachment; filename={filename}'
+    return response
+
+@app.route('/admin/user/<int:user_id>/approve', methods=['POST'])
+@token_required
+def admin_approve_user(current_user, user_id):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('UPDATE users SET account_status = ?, approved_by = ?, approved_at = ? WHERE id = ?',
+              ('active', current_user, datetime.now().isoformat(), user_id))
+    conn.commit()
+    conn.close()
+    log_audit(current_user, "user_approved", f"User ID {user_id} approved")
+    return jsonify({'message': 'User approved successfully'})
+
+@app.route('/admin/user/<int:user_id>/suspend', methods=['POST'])
+@token_required
+def admin_suspend_user(current_user, user_id):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('UPDATE users SET account_status = ? WHERE id = ?', ('suspended', user_id))
+    conn.commit()
+    conn.close()
+    log_audit(current_user, "user_suspended", f"User ID {user_id} suspended")
+    return jsonify({'message': 'User suspended successfully'})
+
+@app.route('/admin/user/<int:user_id>/activate', methods=['POST'])
+@token_required
+def admin_reactivate_user(current_user, user_id):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('UPDATE users SET account_status = ? WHERE id = ?', ('active', user_id))
+    conn.commit()
+    conn.close()
+    log_audit(current_user, "user_reactivated", f"User ID {user_id} reactivated")
+    return jsonify({'message': 'User reactivated successfully'})
+
+@app.route('/admin/user/<int:user_id>/activate', methods=['POST'])
+@token_required
+def admin_activate_user(current_user, user_id):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('UPDATE users SET is_active = 1 WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'User activated successfully'})
+
+@app.route('/admin/user/<int:user_id>', methods=['DELETE'])
+@token_required
+def admin_delete_user(current_user, user_id):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'User deleted successfully'})
+
+@app.route('/admin/toggle-registration', methods=['POST'])
+@token_required
+def admin_toggle_reg(current_user):
+    return jsonify({'message': 'Registration toggled successfully', 'enabled': True})
+
+@app.route('/admin/workload-report', methods=['GET'])
+@token_required
+def admin_workload_report(current_user):
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('''
+        SELECT u.id, u.username, u.email,
+               COUNT(f.id) as scan_count,
+               SUM(CASE WHEN f.verified = 1 THEN 1 ELSE 0 END) as stored_count,
+               SUM(CASE WHEN f.category IN ('Defamatory', 'Hate Speech') THEN 1 ELSE 0 END) as threat_count
+        FROM users u
+        LEFT JOIN fetched_evidence f ON u.id = f.user_id
+        WHERE u.is_admin = 0
+        GROUP BY u.id
+        ORDER BY scan_count DESC
+        LIMIT 50
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    workload = [
+        {'id': r[0], 'username': r[1], 'email': r[2], 'scans': r[3] or 0, 'stored': r[4] or 0, 'threats': r[5] or 0}
+        for r in rows
+    ]
+    return jsonify({'workload': workload})
+
 if __name__ == '__main__':
+    # Create admin user on startup
+    create_admin_user()
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=os.getenv('FLASK_ENV') == 'development')

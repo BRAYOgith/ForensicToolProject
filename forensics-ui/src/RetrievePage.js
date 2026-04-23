@@ -169,12 +169,12 @@ function RetrievePage() {
             <h2 className="text-3xl font-extrabold text-[var(--text-primary)] mb-2">
               Evidence Log
             </h2>
-            <p className="text-[var(--accent-cyan)] font-mono text-xs tracking-widest uppercase italic">Immutable Blockchain Retrieval</p>
+            <p className="text-[var(--accent-cyan)] font-mono text-sm tracking-widest uppercase italic">Immutable Blockchain Retrieval</p>
           </header>
 
           <form onSubmit={handleRetrieve} className="space-y-6">
             <div className="group">
-              <label htmlFor="evidenceId" className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+              <label htmlFor="evidenceId" className="block text-sm font-bold text-[var(--accent-primary)] mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
                 Evidence UID (Numeric)
               </label>
               <input
@@ -189,7 +189,7 @@ function RetrievePage() {
             </div>
 
             <div className="relative group">
-              <label htmlFor="txHash" className="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
+              <label htmlFor="txHash" className="block text-sm font-bold text-[var(--accent-primary)] mb-2 uppercase tracking-widest group-focus-within:text-cyan-400 transition-colors">
                 Or Transaction Hash
               </label>
               <input
@@ -223,7 +223,7 @@ function RetrievePage() {
               aria-live="polite"
               className={`mt-8 p-4 bg-[var(--bg-color)]/50 border rounded-xl text-center ${status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? 'border-red-500/50' : 'border-gray-800'}`}
             >
-              <p className="text-gray-400 text-sm font-mono uppercase">
+              <p className="text-[var(--text-secondary)] text-base font-mono uppercase">
                 Status: <span className={`${status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? 'text-red-400' : 'text-cyan-400'} font-bold ml-2`}>{status}</span>
               </p>
             </div>
@@ -243,16 +243,16 @@ function RetrievePage() {
                         }`}
                     >
                       <div className="relative z-10">
-                        <h4 className="text-sm uppercase tracking-[0.2em] mb-2 opacity-80">Blockchain Verified Forensic Audit</h4>
+                        <h4 className="text-base uppercase tracking-[0.2em] mb-2 opacity-80">Blockchain Verified Forensic Audit</h4>
                         <p className="text-3xl font-black mb-2 uppercase">
                           {category === 'Hate Speech' ? 'CRITICAL: HATE SPEECH' :
                             category === 'Defamatory' ? 'WARNING: DEFAMATORY' :
                               'SYSTEM: CLEAR / NEUTRAL'}
                         </p>
-                        <p className="font-mono text-xs mb-4">MODEL CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
+                        <p className="font-mono text-sm mb-4">MODEL CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
 
                         <div className="bg-black/20 backdrop-blur-sm p-4 rounded-xl text-left border border-white/10">
-                          <p className="text-sm leading-relaxed mb-0 font-medium italic opacity-90">
+                          <p className="text-base leading-relaxed mb-0 font-medium italic opacity-90">
                             "{defamation.justification}"
                           </p>
                         </div>
@@ -265,8 +265,8 @@ function RetrievePage() {
                         {Object.entries(defamation.all_scores).map(([key, score]) => (
                           <div key={key} className="bg-[var(--bg-color)] p-4 rounded-2xl border border-gray-800 shadow-inner group">
                             <div className="flex justify-between items-center mb-2">
-                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{key.replace('_', ' ')}</span>
-                              <span className={`text-xs font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-600'}`}>{(score * 100).toFixed(1)}%</span>
+                              <span className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-widest">{key.replace('_', ' ')}</span>
+                              <span className={`text-sm font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-400'}`}>{(score * 100).toFixed(1)}%</span>
                             </div>
                             <div className="h-1.5 w-full bg-gray-900 rounded-full overflow-hidden">
                               <div
@@ -275,7 +275,7 @@ function RetrievePage() {
                               ></div>
                             </div>
                             {defamation.all_justifications && (
-                              <p className="text-[9px] text-gray-600 mt-2 leading-tight opacity-0 group-hover:opacity-100 transition-opacity">
+                              <p className="text-xs text-[var(--text-secondary)] mt-2 leading-tight opacity-0 group-hover:opacity-100 transition-opacity">
                                 {defamation.all_justifications[key]}
                               </p>
                             )}
@@ -286,7 +286,7 @@ function RetrievePage() {
 
                     {defamation.technical_justification && (
                       <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
-                        <p className="text-[10px] text-cyan-400/80 font-mono italic">
+                        <p className="text-xs text-cyan-400/90 font-mono italic">
                           <span className="font-bold uppercase mr-2">Technical Engine Note:</span>
                           {defamation.technical_justification}
                         </p>
@@ -297,26 +297,26 @@ function RetrievePage() {
 
                 <div className="grid md:grid-cols-2 gap-6 mb-8">
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Subject Handle</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Subject Handle</label>
                     <p className="text-white font-bold text-lg">@{retrievedEvidence.author_username || 'N/A'}</p>
                   </div>
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Evidence UID</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Evidence UID</label>
                     <p className="text-white font-bold text-lg">#{retrievedEvidence.evidence_id || 'N/A'}</p>
                   </div>
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Assigned Investigator</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Assigned Investigator</label>
                     <p className="text-white font-bold text-lg">{retrievedEvidence.investigator || 'N/A'}</p>
                   </div>
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Timestamp logged</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-1 block">Timestamp logged</label>
                     <p className="text-white font-bold text-lg">{retrievedEvidence.created_at || retrievedEvidence.timestamp || 'N/A'}</p>
                   </div>
                 </div>
 
                 {retrievedEvidence.engagement && (
                   <div className="mb-8">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-4 block">On-Chain Engagement Snapshot</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 block">On-Chain Engagement Snapshot</label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       {[
                         { label: 'Retweets', value: retrievedEvidence.engagement.retweets },
@@ -325,7 +325,7 @@ function RetrievePage() {
                         { label: 'Views', value: retrievedEvidence.engagement.views }
                       ].map((stat, i) => (
                         <div key={i} className="bg-[var(--bg-color)] p-4 rounded-xl border border-gray-800 text-center shadow-inner">
-                          <p className="text-[9px] text-gray-500 uppercase mb-1">{stat.label}</p>
+                          <p className="text-xs text-[var(--text-secondary)] uppercase mb-1">{stat.label}</p>
                           <p className="text-white font-black text-lg">{stat.value?.toLocaleString() || '0'}</p>
                         </div>
                       ))}
@@ -351,7 +351,7 @@ function RetrievePage() {
                       </h4>
                     </div>
 
-                    <div className="space-y-2 font-mono text-[9px] opacity-80 uppercase tracking-tighter">
+                    <div className="space-y-2 font-mono text-xs opacity-90 uppercase tracking-tighter">
                       <div className="flex justify-between border-b border-white/5 pb-1">
                         <span>On-Chain Fingerprint (Master):</span>
                         <span className="truncate ml-4">{retrievedEvidence.verification.on_chain_hash || 'N/A'}</span>
@@ -362,7 +362,7 @@ function RetrievePage() {
                           {retrievedEvidence.verification.calculated_hash || 'UNKNOWN'}
                         </span>
                       </div>
-                      <p className="text-[8px] leading-tight mt-3 text-gray-500 normal-case italic">
+                      <p className="text-xs leading-tight mt-3 text-[var(--text-secondary)] normal-case italic">
                         The SHA-256 algorithm was re-executed locally on the retrieved content and metadata to ensure no alteration occurred since the primary anchor was created on Sepolia.
                       </p>
                     </div>
@@ -370,7 +370,7 @@ function RetrievePage() {
                 )}
 
                 <div className="bg-[var(--bg-color)] p-8 rounded-3xl border border-gray-800 shadow-inner mb-8">
-                  <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-3 block">Immutable Content Record</label>
+                  <label className="text-xs font-black text-cyan-400 uppercase tracking-widest mb-3 block">Immutable Content Record</label>
                   <p className="text-gray-300 leading-relaxed italic text-lg">
                     "{retrievedEvidence.text || retrievedEvidence.content || 'No text content recorded.'}"
                   </p>
@@ -378,12 +378,12 @@ function RetrievePage() {
 
                 {ethTxHash && (
                   <div className="bg-[var(--bg-color)] p-5 rounded-2xl border border-gray-800 shadow-inner mb-10">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2 block">Ethereum Blockchain Receipt (Sepolia)</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-2 block">Ethereum Blockchain Receipt (Sepolia)</label>
                     <a
                       href={`https://sepolia.etherscan.io/tx/${ethTxHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-cyan-400 hover:underline break-all block font-mono text-xs"
+                      className="text-cyan-400 hover:underline break-all block font-mono text-sm font-bold"
                     >
                       {ethTxHash}
                     </a>
@@ -392,7 +392,7 @@ function RetrievePage() {
 
                 {retrievedEvidence.media_urls?.length > 0 && (
                   <div className="mb-10">
-                    <label className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-4 block">Secured Assets ({retrievedEvidence.media_urls.length})</label>
+                    <label className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4 block">Secured Assets ({retrievedEvidence.media_urls.length})</label>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       {retrievedEvidence.media_urls.map((url, i) => (
                         <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-gray-800 shadow-lg group">

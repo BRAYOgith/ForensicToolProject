@@ -158,30 +158,49 @@ def store_evidence(evidence_data):
         # Media URLs (list of strings)
         media_urls = evidence_data.get("media_urls", []) if isinstance(evidence_data.get("media_urls"), list) else []
         
-        # Generate evidence hash (keccak256)
+        # Generate evidence hash (keccak256) - ALWAYS use original full text for forensic proof
         post_id = evidence_data.get("post_id", "0")
         raw_hash = generate_evidence_hash(content, author, post_id, timestamp)
         evidence_hash_bytes = bytes.fromhex(raw_hash)
         
-        logger.info(f"Preparing blockchain transaction for Hash: {raw_hash}")
+        # Truncate strings for on-chain storage to save gas (Originals stay in local DB)
+        # 1000 characters is plenty for a preview on Etherscan/Dashboard
+        content_preview = (content[:997] + "...") if len(content) > 1000 else content
+        justification_preview = (justification[:997] + "...") if len(justification) > 1000 else justification
+
+        logger.info(f"Preparing blockchain transaction for Hash: {raw_hash} (Content length: {len(content)})")
         
         # Build transaction
-        tx = contract.functions.storeEvidence(
+        tx_fn = contract.functions.storeEvidence(
             evidence_hash_bytes,
             timestamp,
-            evidence_data.get("investigator", "2"), 
-            content,
+            str(evidence_data.get("investigator", "2")), 
+            content_preview, # Use optimized preview
             author,
             platform,
             category,
             engagement_json,
             media_urls,
             scaled_confidence,
-            justification # Added justification
-        ).build_transaction({
+            justification_preview # Use optimized preview
+        )
+
+        nonce = web3.eth.get_transaction_count(account.address)
+        
+        # Dynamic Gas Estimation
+        try:
+            gas_estimate = tx_fn.estimate_gas({"from": account.address})
+            # Add 25% safety buffer to prevent "Out of Gas" on mined blocks
+            final_gas = int(gas_estimate * 1.25)
+            logger.info(f"Estimated Gas: {gas_estimate}, Cap set to: {final_gas}")
+        except Exception as ge:
+            logger.warning(f"Gas estimation failed, falling back to safety limit: {ge}")
+            final_gas = 3000000 # Higher safety fallback
+
+        tx = tx_fn.build_transaction({
             "from": account.address,
-            "nonce": web3.eth.get_transaction_count(account.address),
-            "gas": 2000000, 
+            "nonce": nonce,
+            "gas": final_gas, 
             "gasPrice": web3.eth.gas_price,
             "chainId": 11155111
         })

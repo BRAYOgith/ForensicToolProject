@@ -16,6 +16,10 @@ function LoginPage({ setIsAuthenticated }) {
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [mustResetAdminPassword, setMustResetAdminPassword] = useState(false);
+  const [adminResetToken, setAdminResetToken] = useState('');
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
 
   const navigate = useNavigate();
 
@@ -42,8 +46,22 @@ function LoginPage({ setIsAuthenticated }) {
       if (response.ok) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user_id', data.user_id);
+        localStorage.setItem('is_admin', data.is_admin ? '1' : '0');
+
+        if (data.require_password_reset) {
+          setAdminResetToken(data.token);
+          setMustResetAdminPassword(true);
+          setLoading(false);
+          return;
+        }
+
         if (setIsAuthenticated) setIsAuthenticated(true);
-        navigate('/', { replace: true });
+
+        if (data.is_admin) {
+          navigate('/admin', { replace: true });
+        } else {
+          navigate('/', { replace: true });
+        }
       } else {
         setError(data.error || 'Login failed');
       }
@@ -169,6 +187,83 @@ function LoginPage({ setIsAuthenticated }) {
     }
   };
 
+  const handleAdminPasswordReset = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (adminNewPassword !== adminConfirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (!isPasswordSecure(adminNewPassword)) {
+      setError('Password must be at least 8 characters, include uppercase, lowercase, number, and symbol.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/admin/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminResetToken}`
+        },
+        credentials: 'include',
+        body: JSON.stringify({ password: adminNewPassword }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSuccess('Security protocol complete. Primary administrative credentials updated. Please log in with your new password.');
+        setMustResetAdminPassword(false);
+        // Clear all temporary auth data to force fresh login
+        localStorage.removeItem('token');
+        localStorage.removeItem('user_id');
+        localStorage.removeItem('is_admin');
+        if (setIsAuthenticated) setIsAuthenticated(false);
+        setUsername('');
+        setPassword('');
+        setAdminNewPassword('');
+        setAdminConfirmPassword('');
+      } else {
+        setError(data.error || 'Identity verification failed. Please check password requirements.');
+      }
+    } catch (err) {
+      setError('Network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAdminEmergencyReset = async () => {
+    if (!window.confirm('WARNING: This will reset the root administrative account to default credentials. Proceed?')) return;
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(`${API_BASE}/admin/emergency-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin' }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        setSuccess(data.message);
+        setIsForgotPassword(false);
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Network error during recovery.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const isPasswordSecure = (p) => {
     return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/.test(p);
   };
@@ -202,10 +297,10 @@ function LoginPage({ setIsAuthenticated }) {
         {/* Content */}
         <div className="relative z-20 max-w-lg text-white reveal-fade-in">
           <div className="mb-8 inline-block px-4 py-2 bg-accent/20 border border-accent/30 rounded-full">
-            <span className="text-accent text-xs font-bold tracking-[0.2em] uppercase">Enterprise Grade Intelligence</span>
+            <span className="text-accent text-sm font-black tracking-[0.2em] uppercase">Enterprise Grade Intelligence</span>
           </div>
           <h1 className="text-5xl lg:text-6xl font-black mb-6 leading-tight font-heading">
-            Securing the <br />
+            Securing the Internet<br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent to-cyan-400">Digital Frontline.</span>
           </h1>
           <p className="text-xl text-gray-300 mb-10 leading-relaxed font-light">
@@ -215,18 +310,18 @@ function LoginPage({ setIsAuthenticated }) {
           <div className="grid grid-cols-2 gap-8 pt-8 border-t border-white/10">
             <div>
               <p className="text-3xl font-bold text-white mb-1">99.9%</p>
-              <p className="text-xs text-gray-400 uppercase tracking-widest">Metadata Recall</p>
+              <p className="text-sm text-gray-400 uppercase tracking-widest font-bold">Metadata Recall</p>
             </div>
             <div>
               <p className="text-3xl font-bold text-white mb-1">10k+</p>
-              <p className="text-xs text-gray-400 uppercase tracking-widest">Anchored Evidence</p>
+              <p className="text-sm text-gray-400 uppercase tracking-widest font-bold">Anchored Evidence</p>
             </div>
           </div>
         </div>
 
         {/* Branding Footer */}
         <div className="absolute bottom-10 left-12 z-20 flex items-center gap-4 text-white/40">
-          <p className="text-[10px] tracking-[.3em] uppercase font-bold">Powered by Ethereum Blockchain & AI Analyzers</p>
+          <p className="text-xs tracking-[.3em] uppercase font-black text-white/50">Powered by Ethereum Blockchain & AI Analyzers</p>
         </div>
       </div>
 
@@ -239,7 +334,7 @@ function LoginPage({ setIsAuthenticated }) {
             <h2 className="text-3xl font-bold text-[var(--text-primary)] mb-2">
               {isForgotPassword ? 'Reset Password' : isRegistering ? 'Register' : 'Login'}
             </h2>
-            <p className="text-[var(--text-secondary)] text-sm">
+            <p className="text-[var(--text-secondary)] text-base font-medium">
               {isForgotPassword
                 ? 'Enter your email to receive a secure reset link.'
                 : isRegistering
@@ -249,12 +344,64 @@ function LoginPage({ setIsAuthenticated }) {
           </div>
 
           {success && (
-            <div className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 px-4 py-3 rounded-xl mb-8 text-center text-sm font-medium">
+            <div className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 px-4 py-3 rounded-xl mb-8 text-center text-base font-bold">
               {success}
             </div>
           )}
 
-          {isForgotPassword ? (
+          {mustResetAdminPassword ? (
+            <form onSubmit={handleAdminPasswordReset} className="space-y-6">
+              <div className="bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 p-5 rounded-xl mb-6 text-base font-medium">
+                <p className="font-black mb-1 uppercase tracking-tight">Security Protocol Required</p>
+                First-time administrator login detected. You must change your default password to continue.
+              </div>
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">New Admin Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={adminNewPassword}
+                    onChange={(e) => setAdminNewPassword(e.target.value)}
+                    className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-[var(--text-primary)] transition-all"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 text-sm font-black uppercase transition-colors"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Confirm New Password</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={adminConfirmPassword}
+                    onChange={(e) => setAdminConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-[var(--text-primary)] transition-all"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 text-xs font-black uppercase"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-cyan-500 text-[#0A192F] font-black py-4 rounded-xl hover:opacity-90 transition-all uppercase tracking-[0.2em] text-sm"
+              >
+                {loading ? 'Processing...' : 'Apply Admin Security'}
+              </button>
+            </form>
+          ) : isForgotPassword ? (
             <form onSubmit={handleForgotPassword} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Email Address</label>
@@ -267,21 +414,32 @@ function LoginPage({ setIsAuthenticated }) {
                   placeholder="name@example.com"
                 />
               </div>
-              {error && <div className="bg-red-500/10 border border-red-500/30 text-red-500 text-xs py-3 rounded-lg text-center uppercase tracking-widest">{error}</div>}
+              {error && <div className="bg-red-500/10 border border-red-500/30 text-red-500 text-sm py-4 rounded-lg text-center font-black uppercase tracking-widest">{error}</div>}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-accent text-white font-black py-4 rounded-xl hover:opacity-90 transition-all shadow-xl shadow-cyan-500/20 uppercase tracking-[0.2em] text-xs"
+                className="w-full bg-accent text-white font-black py-5 rounded-xl hover:opacity-90 transition-all shadow-xl shadow-cyan-500/20 uppercase tracking-[0.25em] text-sm"
               >
                 {loading ? 'Transmitting...' : 'Send Reset Link'}
               </button>
               <button
                 type="button"
                 onClick={() => setIsForgotPassword(false)}
-                className="w-full text-gray-500 hover:text-accent text-xs font-bold uppercase tracking-widest mt-4 transition-colors"
+                className="w-full text-gray-500 hover:text-accent text-sm font-black uppercase tracking-widest mt-6 transition-colors"
               >
                 ← Return to Login
               </button>
+
+              <div className="mt-8 pt-8 border-t border-white/5">
+                <p className="text-sm text-red-400/80 text-center uppercase tracking-widest mb-4 font-mono font-black animate-pulse">// Emergency Administration Override //</p>
+                <button
+                  type="button"
+                  onClick={handleAdminEmergencyReset}
+                  className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-black py-5 rounded-xl transition-all uppercase tracking-[0.15em] text-xs"
+                >
+                  Hard Reset Admin Credentials
+                </button>
+              </div>
             </form>
           ) : (
             <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-5">
@@ -313,17 +471,17 @@ function LoginPage({ setIsAuthenticated }) {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-accent text-xs font-black uppercase"
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-accent text-sm font-black uppercase"
                   >
                     {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
                 {isRegistering && password && (
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className={`p-2 rounded border ${password.length >= 8 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-[9px] font-bold text-center`}>LENGTH 8+</div>
-                    <div className={`p-2 rounded border ${/[A-Z]/.test(password) && /[a-z]/.test(password) ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-[9px] font-bold text-center`}>CASE MIX</div>
-                    <div className={`p-2 rounded border ${/\d/.test(password) ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-[9px] font-bold text-center`}>NUMERIC</div>
-                    <div className={`p-2 rounded border ${/[@$!%*?&]/.test(password) ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-[9px] font-bold text-center`}>SYMBOL</div>
+                    <div className={`p-2 rounded border ${password.length >= 8 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-xs font-bold text-center`}>LENGTH 8+</div>
+                    <div className={`p-2 rounded border ${/[A-Z]/.test(password) && /[a-z]/.test(password) ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-xs font-bold text-center`}>CASE MIX</div>
+                    <div className={`p-2 rounded border ${/\d/.test(password) ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-xs font-bold text-center`}>NUMERIC</div>
+                    <div className={`p-2 rounded border ${/[@$!%*?&]/.test(password) ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-gray-100 border-gray-200 text-gray-400'} text-xs font-bold text-center`}>SYMBOL</div>
                   </div>
                 )}
               </div>
@@ -366,7 +524,7 @@ function LoginPage({ setIsAuthenticated }) {
                           required
                         />
                       </div>
-                      <label htmlFor="terms" className="text-xs text-gray-500 font-medium leading-normal cursor-pointer hover:text-accent transition-colors">
+                      <label htmlFor="terms" className="text-sm text-gray-500 font-bold leading-normal cursor-pointer hover:text-accent transition-colors">
                         I agree to the <Link to="/terms" className="text-accent hover:underline font-bold">Terms and Conditions</Link>
                       </label>
                     </div>
@@ -381,7 +539,7 @@ function LoginPage({ setIsAuthenticated }) {
                           required
                         />
                       </div>
-                      <label htmlFor="privacy" className="text-xs text-gray-500 font-medium leading-normal cursor-pointer hover:text-accent transition-colors">
+                      <label htmlFor="privacy" className="text-sm text-gray-500 font-bold leading-normal cursor-pointer hover:text-accent transition-colors">
                         I acknowledge the <Link to="/privacy" className="text-accent hover:underline font-bold">Privacy Policy</Link>
                       </label>
                     </div>
@@ -393,7 +551,7 @@ function LoginPage({ setIsAuthenticated }) {
                 <div className="flex justify-between items-center py-2">
                   <div className="flex items-center gap-2">
                     <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-accent focus:ring-accent" id="remember" />
-                    <label htmlFor="remember" className="text-xs text-gray-500 font-medium cursor-pointer">Stay logged in</label>
+                    <label htmlFor="remember" className="text-sm text-gray-300 font-bold cursor-pointer">Stay logged in</label>
                   </div>
                   <button
                     type="button"
@@ -406,7 +564,7 @@ function LoginPage({ setIsAuthenticated }) {
               )}
 
               {error && (
-                <div className="bg-red-500/10 border border-red-500/30 text-red-500 px-4 py-3 rounded-xl text-center text-xs font-bold uppercase tracking-widest">
+                <div className="bg-red-500/10 border border-red-500/30 text-red-500 px-4 py-4 rounded-xl text-center text-sm font-black uppercase tracking-widest">
                   {error}
                 </div>
               )}
@@ -414,7 +572,7 @@ function LoginPage({ setIsAuthenticated }) {
               <button
                 type="submit"
                 disabled={loading || !isFormValid()}
-                className="w-full bg-accent text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-cyan-500/20 transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-[0.25em] text-xs mt-4"
+                className="w-full bg-accent text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-cyan-500/20 transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-[0.25em] text-sm mt-4"
               >
                 {loading ? 'Processing...' : isRegistering ? 'Register' : 'Login'}
               </button>
@@ -424,8 +582,8 @@ function LoginPage({ setIsAuthenticated }) {
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-[var(--border-color)]"></div>
                 </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-[var(--bg-color)] px-4 text-gray-500 font-bold tracking-widest">Or continue with</span>
+                <div className="relative flex justify-center text-sm uppercase">
+                  <span className="bg-[var(--bg-color)] px-4 text-gray-400 font-black tracking-widest">Or continue with</span>
                 </div>
               </div>
 
@@ -453,7 +611,7 @@ function LoginPage({ setIsAuthenticated }) {
                       d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 12-4.53z"
                     />
                   </svg>
-                  <span className="text-xs font-bold text-[var(--text-primary)]">Google</span>
+                  <span className="text-sm font-black text-[var(--text-primary)]">Google</span>
                 </button>
 
                 <button
@@ -464,7 +622,7 @@ function LoginPage({ setIsAuthenticated }) {
                   <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                   </svg>
-                  <span className="text-xs font-bold text-[var(--text-primary)]">GitHub</span>
+                  <span className="text-sm font-black text-[var(--text-primary)]">GitHub</span>
                 </button>
               </div>
             </form>
@@ -473,7 +631,7 @@ function LoginPage({ setIsAuthenticated }) {
           {showActivationHelp && (
             <div className="mt-8 bg-amber-500/5 border border-amber-500/20 rounded-2xl p-6">
               <h3 className="text-sm font-bold text-amber-500 mb-2 uppercase tracking-tight">Account Not Activated?</h3>
-              <p className="text-xs text-gray-500 mb-4 font-medium">Please check your email to activate your account. If missing, request a new link below.</p>
+              <p className="text-sm text-gray-400 mb-4 font-bold">Please check your email to activate your account. If missing, request a new link below.</p>
 
               <form onSubmit={handleResendActivation} className="space-y-4">
                 <input
@@ -481,14 +639,14 @@ function LoginPage({ setIsAuthenticated }) {
                   value={resendEmail}
                   onChange={(e) => setResendEmail(e.target.value)}
                   placeholder="Registered email"
-                  className="w-full px-4 py-3 bg-[var(--bg-secondary)] border border-amber-500/20 rounded-xl focus:ring-2 focus:ring-amber-500 text-[var(--text-primary)] placeholder-gray-600 text-xs"
+                  className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-amber-500/20 rounded-xl focus:ring-2 focus:ring-amber-500 text-[var(--text-primary)] placeholder-gray-600 text-sm font-bold"
                   required
                   disabled={loading}
                 />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 font-black py-3 rounded-xl transition-all uppercase tracking-widest text-[9px]"
+                  className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 font-black py-4 rounded-xl transition-all uppercase tracking-[0.15em] text-xs"
                 >
                   {loading ? 'Requesting...' : 'Resend Activation Link'}
                 </button>
@@ -505,11 +663,11 @@ function LoginPage({ setIsAuthenticated }) {
                 setSuccess('');
                 setResendEmail('');
               }}
-              className="text-gray-400 hover:text-accent font-black text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 mx-auto"
+              className="text-gray-400 hover:text-accent font-black text-sm uppercase tracking-widest transition-colors flex items-center justify-center gap-2 mx-auto"
               disabled={loading}
             >
               <span>{isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}</span>
-              <span className="text-accent">-></span>
+              <span className="text-accent">&rarr;</span>
             </button>
           </div>
         </div>
