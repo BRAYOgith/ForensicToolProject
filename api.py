@@ -921,9 +921,9 @@ def login():
     c = conn.cursor()
     c.execute('SELECT id, password, is_active, is_admin, account_status, failed_attempts, lockout_until FROM users WHERE username = ?', (username,))
     user = c.fetchone()
-    conn.close()
 
     if not user:
+        conn.close()
         return jsonify({'error': 'Invalid username or password'}), 401
 
     # Handle old database rows with fallback defaults
