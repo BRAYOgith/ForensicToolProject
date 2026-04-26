@@ -1,5 +1,5 @@
-# Use Python slim base
-FROM python:3.11-slim
+# Use Python slim bullseye base for wkhtmltopdf compatibility
+FROM python:3.11-slim-bullseye
 
 WORKDIR /app
 
@@ -36,5 +36,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:5000/health || exit 1
 
-# Run gunicorn with production settings
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "--timeout", "120", "--keep-alive", "5", "api:app"]
+# Run gunicorn with production settings optimized for Render Free Tier (512MB RAM)
+CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:5000", "--timeout", "120", "--keep-alive", "5", "api:app"]
