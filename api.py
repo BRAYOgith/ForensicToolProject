@@ -429,8 +429,36 @@ def init_db():
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         email TEXT,
-        is_active INTEGER DEFAULT 0
+        is_active INTEGER DEFAULT 0,
+        is_admin INTEGER DEFAULT 0,
+        account_status TEXT DEFAULT 'active',
+        failed_attempts INTEGER DEFAULT 0,
+        lockout_until TEXT,
+        password_history TEXT,
+        last_password_change TEXT,
+        last_login TEXT,
+        last_login_ip TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
+    
+    # Migrate old databases - add missing columns
+    columns = [row[1] for row in c.execute('PRAGMA table_info(users)').fetchall()]
+    if 'is_admin' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0')
+    if 'account_status' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN account_status TEXT DEFAULT "active"')
+    if 'failed_attempts' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0')
+    if 'lockout_until' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN lockout_until TEXT')
+    if 'password_history' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN password_history TEXT')
+    if 'last_password_change' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN last_password_change TEXT')
+    if 'last_login' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN last_login TEXT')
+    if 'last_login_ip' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN last_login_ip TEXT')
     c.execute('''CREATE TABLE IF NOT EXISTS fetched_evidence (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -556,6 +584,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Ensure database is initialized and migrated on startup, even when run via Gunicorn
+init_db()
+
 def log_audit(user_id, action, details):
     """
     Log a user action with tamper-evident hash chaining.
@@ -667,7 +698,7 @@ def register():
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
     try:
-        c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 0, ?, ?, ?, ?, 0)', 
+        c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 0, ?, ?, ?, 0)', 
                   (username, hashed, email, 'pending', password_history_json, datetime.now().isoformat()))
         user_id = c.lastrowid
         conn.commit()
@@ -689,6 +720,10 @@ def register():
 def get_captcha():
     captcha_id, code = generate_captcha()
     return jsonify({'captcha_id': captcha_id, 'question': code}), 200
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'ok', 'service': 'ForensicToolProject API'}), 200
 
 @app.route('/activate', methods=['GET'])
 def activate():
@@ -889,12 +924,19 @@ def login():
     c = conn.cursor()
     c.execute('SELECT id, password, is_active, is_admin, account_status, failed_attempts, lockout_until FROM users WHERE username = ?', (username,))
     user = c.fetchone()
+    conn.close()
 
     if not user:
-        log_audit(0, "login_failed", f"User not found: {username}")
         return jsonify({'error': 'Invalid username or password'}), 401
 
-    user_id, stored_hash, is_active, is_admin, account_status, failed_attempts, lockout_until = user[0], user[1], user[2], user[3], user[4] if len(user) > 4 else 'active', user[5] if len(user) > 5 else 0, user[6] if len(user) > 6 else None
+    # Handle old database rows with fallback defaults
+    user_id = user[0]
+    stored_hash = user[1]
+    is_active = user[2] if user[2] is not None else 0
+    is_admin = user[3] if user[3] is not None else 0
+    account_status = user[4] if user[4] and len(user) > 4 else 'active'
+    failed_attempts = user[5] if len(user) > 5 and user[5] is not None else 0
+    lockout_until = user[6] if len(user) > 6 and user[6] else None
 
     # Check if account is locked due to too many failed attempts
     if lockout_until:
@@ -1845,6 +1887,7 @@ def generate_report(current_user, user_id):
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
     username = c.fetchone()[0]
+    report_subject = f"Activity Report for {username}"
 
     base_query = 'SELECT post_id, content, author_username, created_at, media_urls, timestamp, verified, category, confidence FROM fetched_evidence WHERE user_id = ?'
     params = [user_id]
@@ -1923,6 +1966,10 @@ def generate_report(current_user, user_id):
     conn.close()
 
     log_audit(current_user, "generate_report", f"User: {user_id}")
+
+    safe_count = sum(1 for item in fetched if item[7] == 'Safe')
+    defamatory_count = sum(1 for item in fetched if item[7] == 'Defamatory')
+    hate_count = sum(1 for item in fetched if item[7] == 'Hate Speech')
 
     html_content = f"""
     <html>
@@ -2501,7 +2548,7 @@ def admin_ai_stats(current_user):
 def admin_pending_users(current_user):
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('SELECT id, username, email, created_at FROM users WHERE is_active = 0')
+    c.execute("SELECT id, username, email, created_at FROM users WHERE account_status = 'pending'")
     rows = c.fetchall()
     conn.close()
     return jsonify({'users': [{'id': r[0], 'username': r[1], 'email': r[2], 'created_at': r[3]} for r in rows]})
@@ -2938,19 +2985,19 @@ def admin_gen_rep(current_user):
     response.headers['Content-Disposition'] = f'attachment; filename={filename}'
     return response
 
-@app.route('/admin/user/<int:user_id>/approve', methods=['POST'])
+@app.route('/admin/user/<int:user_id>/approve', methods=['POST', 'PUT'])
 @token_required
 def admin_approve_user(current_user, user_id):
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('UPDATE users SET account_status = ?, approved_by = ?, approved_at = ? WHERE id = ?',
-              ('active', current_user, datetime.now().isoformat(), user_id))
+    c.execute('UPDATE users SET account_status = ? WHERE id = ?',
+              ('active', user_id))
     conn.commit()
     conn.close()
     log_audit(current_user, "user_approved", f"User ID {user_id} approved")
     return jsonify({'message': 'User approved successfully'})
 
-@app.route('/admin/user/<int:user_id>/suspend', methods=['POST'])
+@app.route('/admin/user/<int:user_id>/suspend', methods=['POST', 'PUT'])
 @token_required
 def admin_suspend_user(current_user, user_id):
     conn = sqlite3.connect('forensic.db')
