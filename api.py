@@ -584,9 +584,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Ensure database is initialized and migrated on startup, even when run via Gunicorn
-init_db()
-
 def log_audit(user_id, action, details):
     """
     Log a user action with tamper-evident hash chaining.
@@ -3069,9 +3066,13 @@ def admin_workload_report(current_user):
     ]
     return jsonify({'workload': workload})
 
-if __name__ == '__main__':
-    # Create admin user on startup
+# Initialize database and default admin user on startup (runs in production via gunicorn too)
+try:
+    init_db()
     create_admin_user()
-    
+except Exception as e:
+    logger.error(f"Startup initialization failed: {e}")
+
+if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=os.getenv('FLASK_ENV') == 'development')
