@@ -7,6 +7,7 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
+        libgl1-mesa-glx \
         libgl1 \
         libglib2.0-0 \
         libpango1.0-0 \
@@ -19,7 +20,7 @@ RUN apt-get update && \
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt || pip install -r requirements.txt || true
+RUN pip install --no-cache-dir -r requirements.txt || true
 
 # Copy all application code
 COPY . .
