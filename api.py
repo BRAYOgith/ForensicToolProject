@@ -438,6 +438,8 @@ def init_db():
         last_password_change TEXT,
         last_login TEXT,
         last_login_ip TEXT,
+        force_password_change INTEGER DEFAULT 0,
+        recovery_key_hash TEXT DEFAULT NULL,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
     
@@ -459,6 +461,10 @@ def init_db():
         c.execute('ALTER TABLE users ADD COLUMN last_login TEXT')
     if 'last_login_ip' not in columns:
         c.execute('ALTER TABLE users ADD COLUMN last_login_ip TEXT')
+    if 'force_password_change' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN force_password_change INTEGER DEFAULT 0')
+    if 'recovery_key_hash' not in columns:
+        c.execute('ALTER TABLE users ADD COLUMN recovery_key_hash TEXT DEFAULT NULL')
     c.execute('''CREATE TABLE IF NOT EXISTS fetched_evidence (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -801,26 +807,91 @@ def resend_activation():
 @limiter.limit("3 per minute")
 def forgot_password():
     data = request.get_json()
+    username = data.get('username')
+    admin_recovery_key = data.get('admin_recovery_key')
     email = data.get('email')
-    if not email:
-        return jsonify({'error': 'Email is required'}), 400
 
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('SELECT id FROM users WHERE email = ?', (email,))
-    user = c.fetchone()
-    conn.close()
 
+    # Admin Recovery Flow (username + recovery key)
+    if username and admin_recovery_key:
+        c.execute('SELECT id, is_admin, recovery_key_hash FROM users WHERE username = ?', (username,))
+        user = c.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'error': 'Invalid username or recovery key.'}), 401
+            
+        user_id, is_admin, recovery_key_hash = user[0], user[1], user[2]
+        
+        if is_admin != 1:
+            conn.close()
+            return jsonify({'error': 'Standard accounts must reset via email link.'}), 403
+            
+        if not recovery_key_hash:
+            conn.close()
+            return jsonify({'error': 'Recovery key has not been set. Please contact system support.'}), 400
+            
+        # Verify recovery key
+        hashed_recovery = recovery_key_hash
+        if isinstance(hashed_recovery, str):
+            hashed_recovery = hashed_recovery.encode('utf-8')
+            
+        if not checkpw(admin_recovery_key.encode('utf-8'), hashed_recovery):
+            conn.close()
+            log_audit(user_id, "admin_recovery_failed", "Invalid recovery key submitted")
+            return jsonify({'error': 'Invalid username or recovery key.'}), 401
+            
+        # Success: Reset admin password to default 'admin123'
+        admin_password = 'admin123'
+        hashed_password = hashpw(admin_password.encode('utf-8'), gensalt()).decode('utf-8')
+        
+        # Clear recovery key hash and set force_password_change = 1
+        c.execute('''
+            UPDATE users 
+            SET password = ?, 
+                recovery_key_hash = NULL, 
+                force_password_change = 1,
+                failed_attempts = 0,
+                lockout_until = NULL
+            WHERE id = ?
+        ''', (hashed_password, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        log_audit(user_id, "admin_recovery_success", "Password reset to default admin123")
+        
+        return jsonify({
+            'message': 'Administrator account reset successful. Please log in using the default credentials (admin / admin123) and save your new recovery key.'
+        }), 200
+
+    # Standard User Flow (email-based)
+    if not email:
+        conn.close()
+        return jsonify({'error': 'Email is required'}), 400
+
+    c.execute('SELECT id, is_admin FROM users WHERE email = ?', (email,))
+    user = c.fetchone()
+    
     if not user:
-        # Don't confirm if user exists or not for security, but we'll return success to prevent Phishing
+        conn.close()
         return jsonify({'message': 'If an account exists with this email, a reset link has been sent.'}), 200
 
+    user_id, is_admin = user[0], user[1]
+    if is_admin == 1:
+        conn.close()
+        return jsonify({'error': 'Administrator accounts must recover using username and Recovery Key.'}), 403
+
     reset_token = jwt.encode({
-        'user_id': user[0],
+        'user_id': user_id,
         'action': 'password_reset',
         'exp': datetime.now(timezone.utc) + timedelta(hours=1)
     }, app.config['SECRET_KEY'])
 
+    conn.close()
+    
     send_forensic_email(email, reset_token, email_type="reset")
     return jsonify({'message': 'A password reset link has been sent to your email.'}), 200
 
@@ -919,7 +990,7 @@ def login():
 
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('SELECT id, password, is_active, is_admin, account_status, failed_attempts, lockout_until FROM users WHERE username = ?', (username,))
+    c.execute('SELECT id, password, is_active, is_admin, account_status, failed_attempts, lockout_until, force_password_change FROM users WHERE username = ?', (username,))
     user = c.fetchone()
 
     if not user:
@@ -934,6 +1005,7 @@ def login():
     account_status = user[4] if user[4] and len(user) > 4 else 'active'
     failed_attempts = user[5] if len(user) > 5 and user[5] is not None else 0
     lockout_until = user[6] if len(user) > 6 and user[6] else None
+    force_password_change = user[7] if len(user) > 7 and user[7] is not None else 0
 
     # Check if account is locked due to too many failed attempts
     if lockout_until:
@@ -1011,6 +1083,7 @@ def login():
         'user_id': user_id,
         'username': username,
         'is_admin': is_admin,
+        'force_password_change': True if force_password_change == 1 else False,
         'expires_in': SESSION_TIMEOUT_HOURS * 3600
     }), 200
 
@@ -2454,6 +2527,105 @@ def logout():
     response.delete_cookie('token', path='/')
     return response
 
+@app.route('/admin/change-password-force', methods=['POST'])
+@token_required
+def change_password_force(current_user):
+    try:
+        data = request.get_json()
+        new_password = data.get('password')
+        
+        if not new_password:
+            return jsonify({'error': 'New password is required'}), 400
+            
+        validation_error = validate_auth_input(password=new_password)
+        if validation_error:
+            return jsonify({'error': validation_error}), 400
+            
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('SELECT is_admin, force_password_change, password_history FROM users WHERE id = ?', (current_user,))
+        row = c.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+            
+        is_admin_user, force_change, password_history = row[0], row[1], row[2]
+        
+        if not is_admin_user:
+            conn.close()
+            return jsonify({'error': 'Unauthorized. Admin account required.'}), 403
+            
+        if force_change != 1:
+            conn.close()
+            return jsonify({'error': 'Password change not required.'}), 400
+            
+        # Check history
+        if password_history:
+            try:
+                history_list = json.loads(password_history)
+                for old_hash in history_list:
+                    if isinstance(old_hash, str):
+                        old_hash = old_hash.encode('utf-8')
+                    if checkpw(new_password.encode('utf-8'), old_hash):
+                        conn.close()
+                        return jsonify({'error': 'New password cannot be any of your last 5 passwords.'}), 400
+            except Exception as e:
+                logger.error(f"Error checking password history: {e}")
+                pass
+
+        # Hash new password
+        new_hash = hashpw(new_password.encode('utf-8'), gensalt()).decode('utf-8')
+        
+        # Generate random 12-char alphanumeric recovery key: FRSC-XXXX-XXXX-XXXX
+        import random
+        import string
+        chars = string.ascii_uppercase + string.digits
+        part1 = ''.join(random.choices(chars, k=4))
+        part2 = ''.join(random.choices(chars, k=4))
+        part3 = ''.join(random.choices(chars, k=4))
+        recovery_key = f"FRSC-{part1}-{part2}-{part3}"
+        
+        # Hash recovery key
+        hashed_recovery = hashpw(recovery_key.encode('utf-8'), gensalt()).decode('utf-8')
+        
+        # Update history
+        try:
+            history_list = json.loads(password_history) if password_history else []
+        except:
+            history_list = []
+        
+        c.execute('SELECT password FROM users WHERE id = ?', (current_user,))
+        curr_pw = c.fetchone()[0]
+        history_list.append(curr_pw)
+        if len(history_list) > 5:
+            history_list.pop(0)
+        new_history = json.dumps(history_list)
+        
+        # Update db
+        c.execute('''
+            UPDATE users 
+            SET password = ?, 
+                recovery_key_hash = ?, 
+                force_password_change = 0, 
+                password_history = ?,
+                last_password_change = ?
+            WHERE id = ?
+        ''', (new_hash, hashed_recovery, new_history, datetime.now().isoformat(), current_user))
+        
+        conn.commit()
+        conn.close()
+        
+        log_audit(current_user, "admin_force_password_change", "Generated recovery key and updated password")
+        
+        return jsonify({
+            'message': 'Password changed successfully.',
+            'recovery_key': recovery_key
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in change_password_force: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # Create default admin user if not exists
 def create_admin_user():
     conn = sqlite3.connect('forensic.db')
@@ -2469,8 +2641,8 @@ def create_admin_user():
         hashed_password = hashpw(admin_password.encode('utf-8'), gensalt())
         
         c.execute('''
-            INSERT INTO users (username, password, email, is_active, is_admin, created_at) 
-            VALUES (?, ?, ?, 1, 1, ?)
+            INSERT INTO users (username, password, email, is_active, is_admin, force_password_change, created_at) 
+            VALUES (?, ?, ?, 1, 1, 1, ?)
         ''', ('admin', hashed_password.decode('utf-8'), 'admin@forensix.local', datetime.now().isoformat()))
         
         conn.commit()
@@ -2478,6 +2650,19 @@ def create_admin_user():
         print('Created admin user: admin / admin123')
         return True
     else:
+        # Check if the existing admin is still using the default password 'admin123'
+        c.execute('SELECT password, force_password_change FROM users WHERE is_admin = 1 LIMIT 1')
+        row = c.fetchone()
+        if row:
+            hashed_pw, force_change = row[0], row[1]
+            if isinstance(hashed_pw, str):
+                hashed_pw = hashed_pw.encode('utf-8')
+            # Check if it is still the default admin123
+            if checkpw('admin123'.encode('utf-8'), hashed_pw):
+                if force_change != 1:
+                    c.execute('UPDATE users SET force_password_change = 1 WHERE is_admin = 1')
+                    conn.commit()
+                    print('Default admin password detected - force_password_change enabled.')
         conn.close()
         print('Admin user already exists - proceeding with existing user')
         return True

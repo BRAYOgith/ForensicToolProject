@@ -20,6 +20,10 @@ function LoginPage({ setIsAuthenticated }) {
   const [adminResetToken, setAdminResetToken] = useState('');
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
+  const [recoveryKey, setRecoveryKey] = useState('');
+  const [isAdminRecovery, setIsAdminRecovery] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('admin');
+  const [adminRecoveryKeyInput, setAdminRecoveryKeyInput] = useState('');
 
   const navigate = useNavigate();
 
@@ -47,7 +51,7 @@ function LoginPage({ setIsAuthenticated }) {
         localStorage.setItem('user_id', data.user_id);
         localStorage.setItem('is_admin', data.is_admin ? '1' : '0');
 
-        if (data.require_password_reset) {
+        if (data.force_password_change) {
           setAdminResetToken(data.token);
           setMustResetAdminPassword(true);
           setLoading(false);
@@ -166,18 +170,32 @@ function LoginPage({ setIsAuthenticated }) {
     setLoading(true);
 
     try {
+      let payload = {};
+      if (isAdminRecovery) {
+        payload = { username: adminUsername, admin_recovery_key: adminRecoveryKeyInput };
+      } else {
+        payload = { email: forgotPasswordEmail };
+      }
+
       const response = await fetch(`${API_BASE}/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email: forgotPasswordEmail }),
+        body: JSON.stringify(payload),
       });
+
       const data = await response.json();
+
       if (response.ok) {
         setSuccess(data.message);
-        setForgotPasswordEmail('');
+        if (isAdminRecovery) {
+          setIsAdminRecovery(false);
+          setIsForgotPassword(false);
+          setAdminRecoveryKeyInput('');
+        } else {
+          setForgotPasswordEmail('');
+        }
       } else {
-        setError(data.error || 'Failed to send reset link');
+        setError(data.error || 'Failed to process request');
       }
     } catch (err) {
       setError('Network error');
@@ -203,7 +221,7 @@ function LoginPage({ setIsAuthenticated }) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/admin/reset-password`, {
+      const response = await fetch(`${API_BASE}/admin/change-password-force`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -214,17 +232,8 @@ function LoginPage({ setIsAuthenticated }) {
       });
       const data = await response.json();
       if (response.ok) {
-        setSuccess('Security protocol complete. Primary administrative credentials updated. Please log in with your new password.');
-        setMustResetAdminPassword(false);
-        // Clear all temporary auth data to force fresh login
-        localStorage.removeItem('token');
-        localStorage.removeItem('user_id');
-        localStorage.removeItem('is_admin');
-        if (setIsAuthenticated) setIsAuthenticated(false);
-        setUsername('');
-        setPassword('');
-        setAdminNewPassword('');
-        setAdminConfirmPassword('');
+        setRecoveryKey(data.recovery_key);
+        setSuccess('Security protocol complete. Primary administrative credentials updated.');
       } else {
         setError(data.error || 'Identity verification failed. Please check password requirements.');
       }
@@ -235,32 +244,18 @@ function LoginPage({ setIsAuthenticated }) {
     }
   };
 
-  const handleAdminEmergencyReset = async () => {
-    if (!window.confirm('WARNING: This will reset the root administrative account to default credentials. Proceed?')) return;
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`${API_BASE}/admin/emergency-reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin' }),
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setSuccess(data.message);
-        setIsForgotPassword(false);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('Network error during recovery.');
-    } finally {
-      setLoading(false);
-    }
+  const handleDismissRecoveryKey = () => {
+    setMustResetAdminPassword(false);
+    setRecoveryKey('');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('is_admin');
+    if (setIsAuthenticated) setIsAuthenticated(false);
+    setUsername('');
+    setPassword('');
+    setAdminNewPassword('');
+    setAdminConfirmPassword('');
+    setSuccess('Primary credentials updated. Please log in with your new password.');
   };
 
   const isPasswordSecure = (p) => {
@@ -349,96 +344,177 @@ function LoginPage({ setIsAuthenticated }) {
           )}
 
           {mustResetAdminPassword ? (
-            <form onSubmit={handleAdminPasswordReset} className="space-y-6">
-              <div className="bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 p-5 rounded-xl mb-6 text-base font-medium">
-                <p className="font-black mb-1 uppercase tracking-tight">Security Protocol Required</p>
-                First-time administrator login detected. You must change your default password to continue.
-              </div>
-              <div className="relative">
-                <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">New Admin Password</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={adminNewPassword}
-                    onChange={(e) => setAdminNewPassword(e.target.value)}
-                    className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-[var(--text-primary)] transition-all"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 text-sm font-black uppercase transition-colors"
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </button>
+            recoveryKey ? (
+              <div className="space-y-6">
+                <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-6 rounded-2xl text-center">
+                  <p className="font-black text-lg uppercase tracking-wider mb-2">⚠ Security Key Generated ⚠</p>
+                  <p className="text-sm opacity-90 leading-relaxed">
+                    Your password has been updated. The system has generated a secure, one-time Recovery Key for your administrator account.
+                  </p>
                 </div>
-              </div>
-              <div className="relative">
-                <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Confirm New Password</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={adminConfirmPassword}
-                    onChange={(e) => setAdminConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-[var(--text-primary)] transition-all"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 text-xs font-black uppercase"
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </button>
+                
+                <div className="bg-black/40 border border-cyan-500/30 p-5 rounded-2xl text-center font-mono select-all">
+                  <p className="text-xs text-gray-500 uppercase tracking-widest mb-2 font-sans font-bold">Your Recovery Key</p>
+                  <p className="text-2xl font-black text-cyan-400 tracking-wider">{recoveryKey}</p>
                 </div>
+
+                <div className="bg-orange-500/10 border border-orange-500/30 text-orange-400 p-4 rounded-xl text-xs leading-relaxed font-medium">
+                  <p className="font-bold uppercase mb-1">Warning:</p>
+                  Save this key in a secure place (e.g. password manager). It is hashed in the database and **cannot be retrieved or shown again**.
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(recoveryKey);
+                    alert('Recovery key copied to clipboard!');
+                  }}
+                  className="w-full bg-cyan-800/50 hover:bg-cyan-800 text-cyan-300 font-bold py-4 rounded-xl transition-all text-sm uppercase tracking-wider border border-cyan-500/20"
+                >
+                  Copy to Clipboard
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDismissRecoveryKey}
+                  className="w-full bg-cyan-500 text-[#0A192F] font-black py-4 rounded-xl hover:opacity-90 transition-all uppercase tracking-[0.2em] text-sm"
+                >
+                  I have saved it, Continue
+                </button>
               </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-cyan-500 text-[#0A192F] font-black py-4 rounded-xl hover:opacity-90 transition-all uppercase tracking-[0.2em] text-sm"
-              >
-                {loading ? 'Processing...' : 'Apply Admin Security'}
-              </button>
-            </form>
+            ) : (
+              <form onSubmit={handleAdminPasswordReset} className="space-y-6">
+                <div className="bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 p-5 rounded-xl mb-6 text-base font-medium">
+                  <p className="font-black mb-1 uppercase tracking-tight">Security Protocol Required</p>
+                  First-time administrator login detected. You must change your default password to continue.
+                </div>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">New Admin Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={adminNewPassword}
+                      onChange={(e) => setAdminNewPassword(e.target.value)}
+                      className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-[var(--text-primary)] transition-all font-sans"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 text-sm font-black uppercase transition-colors"
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                </div>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Confirm New Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={adminConfirmPassword}
+                      onChange={(e) => setAdminConfirmPassword(e.target.value)}
+                      className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-[var(--text-primary)] transition-all font-sans"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 text-xs font-black uppercase"
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                </div>
+                {error && <div className="bg-red-500/10 border border-red-500/30 text-red-500 text-sm py-4 rounded-lg text-center font-black uppercase tracking-widest">{error}</div>}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-cyan-500 text-[#0A192F] font-black py-4 rounded-xl hover:opacity-90 transition-all uppercase tracking-[0.2em] text-sm"
+                >
+                  {loading ? 'Processing...' : 'Apply Admin Security'}
+                </button>
+              </form>
+            )
           ) : isForgotPassword ? (
             <form onSubmit={handleForgotPassword} className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Email Address</label>
-                <input
-                  type="email"
-                  value={forgotPasswordEmail}
-                  onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                  className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-accent focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all"
-                  required
-                  placeholder="name@example.com"
-                />
-              </div>
+              {isAdminRecovery ? (
+                <>
+                  <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-5 rounded-xl mb-6 text-sm font-medium font-mono text-center">
+                    <p className="font-black mb-1 uppercase tracking-tight">{"// SECURE ADMINISTRATION RECOVERY //"}</p>
+                    Enter your admin username and Recovery Key to reset your password back to default credentials.
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Admin Username</label>
+                    <input
+                      type="text"
+                      value={adminUsername}
+                      onChange={(e) => setAdminUsername(e.target.value)}
+                      className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all font-sans"
+                      required
+                      placeholder="e.g. admin"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Admin Recovery Key</label>
+                    <input
+                      type="text"
+                      value={adminRecoveryKeyInput}
+                      onChange={(e) => setAdminRecoveryKeyInput(e.target.value)}
+                      className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all font-mono"
+                      required
+                      placeholder="FRSC-XXXX-XXXX-XXXX"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2 uppercase tracking-wide">Email Address</label>
+                  <input
+                    type="email"
+                    value={forgotPasswordEmail}
+                    onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                    className="w-full px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl focus:ring-2 focus:ring-accent focus:border-transparent text-[var(--text-primary)] placeholder-gray-600 transition-all"
+                    required
+                    placeholder="name@example.com"
+                  />
+                </div>
+              )}
+
               {error && <div className="bg-red-500/10 border border-red-500/30 text-red-500 text-sm py-4 rounded-lg text-center font-black uppercase tracking-widest">{error}</div>}
+
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-accent text-white font-black py-5 rounded-xl hover:opacity-90 transition-all shadow-xl shadow-cyan-500/20 uppercase tracking-[0.25em] text-sm"
+                className={`w-full ${isAdminRecovery ? 'bg-red-600 hover:bg-red-500 shadow-red-500/20' : 'bg-accent'} text-white font-black py-5 rounded-xl hover:opacity-90 transition-all shadow-xl uppercase tracking-[0.25em] text-sm`}
               >
-                {loading ? 'Transmitting...' : 'Send Reset Link'}
+                {loading ? 'Transmitting...' : isAdminRecovery ? 'Recover Admin Account' : 'Send Reset Link'}
               </button>
+
               <button
                 type="button"
-                onClick={() => setIsForgotPassword(false)}
+                onClick={() => {
+                  setIsAdminRecovery(!isAdminRecovery);
+                  setError('');
+                  setSuccess('');
+                }}
+                className={`w-full text-center text-xs font-black uppercase tracking-widest mt-2 transition-colors ${isAdminRecovery ? 'text-gray-400 hover:text-white' : 'text-red-400 hover:text-red-300'}`}
+              >
+                {isAdminRecovery ? '← Standard Account Recovery' : '⚠ Admin Account Recovery'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsForgotPassword(false);
+                  setIsAdminRecovery(false);
+                  setError('');
+                  setSuccess('');
+                }}
                 className="w-full text-gray-500 hover:text-accent text-sm font-black uppercase tracking-widest mt-6 transition-colors"
               >
                 ← Return to Login
               </button>
-
-              <div className="mt-8 pt-8 border-t border-white/5">
-                <p className="text-sm text-red-400/80 text-center uppercase tracking-widest mb-4 font-mono font-black animate-pulse">// Emergency Administration Override //</p>
-                <button
-                  type="button"
-                  onClick={handleAdminEmergencyReset}
-                  className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-black py-5 rounded-xl transition-all uppercase tracking-[0.15em] text-xs"
-                >
-                  Hard Reset Admin Credentials
-                </button>
-              </div>
             </form>
           ) : (
             <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-5">
