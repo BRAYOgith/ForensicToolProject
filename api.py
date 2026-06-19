@@ -268,7 +268,7 @@ def predict_defamatory(text):
     if use_hf:
         logger.info("Running inference via Hugging Face API...")
         try:
-            API_URL = "https://api-inference.huggingface.co/models/BrianNj/afro-xlmr-forensics"
+            API_URL = "https://api-inference.huggingface.co/models/Brayo44/afro_xlmr_forensics"
             # Try specific token, then generic token, then none
             hf_token = os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN')
             headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
