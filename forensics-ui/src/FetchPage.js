@@ -385,7 +385,9 @@ function FetchPage() {
                         ? 'bg-red-600/20 border-red-500 text-red-400'
                         : category === 'Defamatory'
                           ? 'bg-orange-500/10 border-orange-500/50 text-orange-400'
-                          : 'bg-green-500/10 border-green-500/50 text-green-400'
+                          : category === 'Error'
+                            ? 'bg-red-950/20 border-red-500/50 text-red-400 animate-pulse-slow'
+                            : 'bg-green-500/10 border-green-500/50 text-green-400'
                         }`}
                     >
                       <div className="relative z-10">
@@ -393,9 +395,12 @@ function FetchPage() {
                         <p className="text-3xl font-black mb-2">
                           {category === 'Hate Speech' ? 'LEGAL FLAG: HATE SPEECH (NCIC)' :
                             category === 'Defamatory' ? 'SYSTEM FLAG: DEFAMATORY CONTENT' :
-                              'SYSTEM STATUS: NEUTRAL / CLEAR'}
+                              category === 'Error' ? 'AI MODEL ERROR / FAILURE' :
+                                'SYSTEM STATUS: NEUTRAL / CLEAR'}
                         </p>
-                        <p className="font-mono text-sm mb-4 font-black">PRIMARY CONFIDENCE: {(confidence * 100).toFixed(2)}%</p>
+                        <p className="font-mono text-sm mb-4 font-black">
+                          {category === 'Error' ? 'ERROR ENCOUNTERED DURING ANALYSIS' : `PRIMARY CONFIDENCE: ${(confidence * 100).toFixed(2)}%`}
+                        </p>
 
                         {defamation.evidence_source && (
                           <div className="inline-block mb-4 px-4 py-1.5 bg-white/10 rounded-full border border-white/20 text-xs uppercase tracking-widest font-black">
@@ -412,32 +417,36 @@ function FetchPage() {
                     </div>
 
                     {/* Detailed Score Breakdown */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {Object.entries(defamation.all_scores).map(([key, score]) => (
-                        <div key={key} className="bg-[var(--bg-color)] p-4 rounded-2xl border border-gray-800 shadow-inner group">
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-xs font-black text-gray-400 uppercase tracking-widest">{key.replace('_', ' ')}</span>
-                            <span className={`text-sm font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-400'} font-bold`}>{(score * 100).toFixed(1)}%</span>
+                    {defamation.all_scores && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {Object.entries(defamation.all_scores).map(([key, score]) => (
+                          <div key={key} className="bg-[var(--bg-color)] p-4 rounded-2xl border border-gray-800 shadow-inner group">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-xs font-black text-gray-400 uppercase tracking-widest">{key.replace('_', ' ')}</span>
+                              <span className={`text-sm font-mono ${(score * 100) > 40 ? 'text-cyan-400' : 'text-gray-400'} font-bold`}>{(score * 100).toFixed(1)}%</span>
+                            </div>
+                            <div className="h-1.5 w-full bg-gray-900 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-1000 ${key === 'hate_speech' ? 'bg-red-500' : key === 'defamatory' ? 'bg-orange-500' : 'bg-green-500'}`}
+                                style={{ width: `${score * 100}%` }}
+                              ></div>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-2 leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity font-medium italic">
+                              {defamation.all_justifications?.[key]}
+                            </p>
                           </div>
-                          <div className="h-1.5 w-full bg-gray-900 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full transition-all duration-1000 ${key === 'hate_speech' ? 'bg-red-500' : key === 'defamatory' ? 'bg-orange-500' : 'bg-green-500'}`}
-                              style={{ width: `${score * 100}%` }}
-                            ></div>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-2 leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity font-medium italic">
-                            {defamation.all_justifications[key]}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
 
-                    <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
-                      <p className="text-xs text-cyan-400/90 font-mono italic">
-                        <span className="font-black uppercase mr-2 underline decoration-cyan-500/30">Technical Engine Note:</span>
-                        {defamation.technical_justification}
-                      </p>
-                    </div>
+                    {defamation.technical_justification && (
+                      <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl">
+                        <p className="text-xs text-cyan-400/90 font-mono italic">
+                          <span className="font-black uppercase mr-2 underline decoration-cyan-500/30">Technical Engine Note:</span>
+                          {defamation.technical_justification}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
