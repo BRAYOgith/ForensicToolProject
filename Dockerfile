@@ -20,7 +20,7 @@ RUN apt-get update && \
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt || true
+RUN pip install --no-cache-dir -r requirements.txt || pip install -r requirements.txt || true
 
 # Copy all application code
 COPY . .
@@ -38,3 +38,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Run gunicorn with production settings optimized for Render Free Tier (512MB RAM)
 CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:5000", "--timeout", "120", "--keep-alive", "5", "api:app"]
+

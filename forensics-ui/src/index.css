@@ -4,37 +4,42 @@
 
 @layer base {
   :root {
-    /* Default is Consultancy Mode (Premium Professional) */
-    --bg-color: #fcfcfd;
-    --bg-secondary: #ffffff;
-    --text-primary: #0f172a;
-    --text-secondary: #334155;
-    --accent-primary: #1e3a8a;
-    /* Deep Navy */
-    --accent-secondary: #92400e;
-    /* Refined Gold */
-    --border-color: #e2e8f0;
+    /* Default is Consultancy Mode (Premium Professional) - Increased font sizes and brighter colors */
+    --bg-color: #ffffff;
+    --bg-secondary: #f8fafc;
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
+    --accent-primary: #2563eb;
+    /* Brighter Blue */
+    --accent-secondary: #d97706;
+    /* Brighter Gold/Orange */
+    --border-color: #cbd5e1;
     --glass-border: rgba(0, 0, 0, 0.05);
     --glass-bg: rgba(255, 255, 255, 0.95);
     --font-heading: 'Playfair Display', serif;
     --font-body: 'Inter', sans-serif;
     --shadow-soft: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
     --shadow-premium: 0 20px 25px -5px rgb(0 0 0 / 0.05), 0 8px 10px -6px rgb(0 0 0 / 0.05);
+    font-size: 18px;
+    /* Global font size increase */
   }
 
-  /* Tech Mode (Tech/Hacker Aesthetic) */
+  /* Tech Mode (Tech/Hacker Aesthetic) - Brighter colors */
   [data-theme-mode='tech'] {
-    --bg-color: #0A192F;
-    --bg-secondary: #112240;
-    --text-primary: #ffffff;
-    --text-secondary: #94a3b8;
-    --accent-primary: #06b6d4;
-    --accent-secondary: #64ffda;
-    --border-color: rgba(255, 255, 255, 0.1);
-    --glass-border: rgba(255, 255, 255, 0.05);
-    --glass-bg: rgba(17, 34, 64, 0.75);
+    --bg-color: #0f172a;
+    --bg-secondary: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --accent-primary: #22d3ee;
+    /* Brighter Cyan */
+    --accent-secondary: #34d399;
+    /* Brighter Emerald */
+    --border-color: rgba(255, 255, 255, 0.15);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-bg: rgba(30, 41, 59, 0.8);
     --shadow-soft: 0 10px 30px -15px rgba(2, 12, 27, 0.7);
     --shadow-premium: 0 20px 25px -5px rgba(2, 12, 27, 0.8);
+    font-size: 18px;
   }
 
   /* Accessibility Mode Override */
@@ -45,7 +50,7 @@
     --text-secondary: #1a1a1a !important;
     --accent-primary: #0000ee !important;
     --border-color: #000000 !important;
-    font-size: 110%;
+    font-size: 120% !important;
     font-weight: 500;
   }
 
@@ -57,6 +62,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.4s ease, color 0.4s ease;
+    font-size: 1rem;
   }
 
   h1,
@@ -67,6 +73,13 @@
   h6 {
     font-family: var(--font-heading);
   }
+
+  h1 { font-size: 2.75rem; }
+  h2 { font-size: 2.25rem; }
+  h3 { font-size: 1.875rem; }
+  h4 { font-size: 1.5rem; }
+  h5 { font-size: 1.25rem; }
+  h6 { font-size: 1.125rem; }
 }
 
 /* Component Classes */
@@ -153,6 +166,10 @@
 .reveal.active {
   opacity: 1;
   transform: translateY(0);
+}
+
+.reveal-fade-in {
+  animation: fadeInUp 0.6s ease-out forwards;
 }
 
 /* Glow Orb */

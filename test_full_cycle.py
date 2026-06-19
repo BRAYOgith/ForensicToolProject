@@ -13,17 +13,21 @@ def test_cycle():
 
     # Mock evidence data
     evidence_data = {
-        "hash": "test_hash_789",
-        "timestamp": "2026-03-24T18:00:00",
-        "investigator": "0x25Dfafc7dB916387EA0627820169D9335538bB4c",
-        "content": "Test evidence content for final verification",
+        "text": "Test evidence content for final verification",
         "author_username": "tester",
         "platform": "test_platform",
-        "category": "Test",
-        "engagement_metrics": '{"likes": 10}',
-        "media_urls": ["http://example.com/image.jpg"],
-        "confidence": 95
+        "created_at": "2026-03-24T18:00:00",
+        "post_id": "1002",
+        "investigator": "0x25Dfafc7dB916387EA0627820169D9335538bB4c",
+        "defamation": {
+            "category": "Test",
+            "confidence": 0.95,
+            "justification": "Test justification"
+        },
+        "engagement": {"likes": 10},
+        "media_urls": ["http://example.com/image.jpg"]
     }
+
 
     print("\nStep 2: Storing Evidence on Blockchain...")
     result = store_blockchain.store_evidence(evidence_data)

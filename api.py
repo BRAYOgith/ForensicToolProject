@@ -942,6 +942,7 @@ def login():
             if lockout_time > datetime.now():
                 remaining_seconds = int((lockout_time - datetime.now()).total_seconds())
                 log_audit(user_id, "login_blocked", f"Account locked, {remaining_seconds}s remaining")
+                conn.close()
                 return jsonify({'error': f'Too many failed attempts. Try again in {remaining_seconds} seconds.'}), 403
             else:
                 # Lockout expired, reset failed attempts
