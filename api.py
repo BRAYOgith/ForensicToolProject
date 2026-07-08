@@ -1269,7 +1269,9 @@ def facebook_login():
 # --- WebAuthn / Passkey Endpoints ---
 
 def get_rp_info():
-    rp_origin = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    rp_origin = request.headers.get('Origin')
+    if not rp_origin:
+        rp_origin = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     rp_id = urlparse(rp_origin).hostname
     return rp_id, rp_origin
 
