@@ -20,8 +20,23 @@ import secrets
 import string
 import io
 import base64
-
-def generate_pdf(html_content, options=None):
+import uuid
+from urllib.parse import urlparse
+from webauthn import (
+    generate_registration_options,
+    verify_registration_response,
+    generate_authentication_options,
+    verify_authentication_response,
+    options_to_json,
+    base64url_to_bytes,
+)
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    UserVerificationRequirement,
+    ResidentKeyRequirement,
+    AuthenticatorAttachment,
+)
+from webauthn.helpers.exceptions import InvalidRegistrationResponse, InvalidAuthenticationResponse
     try:
         return pdfkit.from_string(html_content, False, options=options or {})
     except OSError as e:
@@ -469,6 +484,23 @@ def init_db():
         c.execute('ALTER TABLE users ADD COLUMN force_password_change INTEGER DEFAULT 0')
     if 'recovery_key_hash' not in columns:
         c.execute('ALTER TABLE users ADD COLUMN recovery_key_hash TEXT DEFAULT NULL')
+        
+    c.execute('''CREATE TABLE IF NOT EXISTS webauthn_credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        credential_id TEXT UNIQUE NOT NULL,
+        public_key TEXT NOT NULL,
+        sign_count INTEGER DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS webauthn_challenges (
+        challenge_id TEXT PRIMARY KEY,
+        challenge TEXT NOT NULL,
+        user_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS fetched_evidence (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -1161,6 +1193,281 @@ def google_login():
     except ValueError:
         return jsonify({'error': 'Invalid Google token'}), 401
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/facebook-login', methods=['POST'])
+@limiter.limit("5 per minute")
+def facebook_login():
+    data = request.get_json()
+    token = data.get('accessToken')
+    if not token:
+        return jsonify({'error': 'Token is required'}), 400
+
+    try:
+        resp = requests.get(f"https://graph.facebook.com/me?fields=id,name,email&access_token={token}")
+        if resp.status_code != 200:
+            return jsonify({'error': 'Invalid Facebook token'}), 401
+        
+        fb_user = resp.json()
+        email = fb_user.get('email')
+        fb_id = fb_user.get('id')
+        username = fb_user.get('name') or (email.split('@')[0] if email else f"facebook_{fb_id}")
+
+        if not email:
+            email = f"{fb_id}@facebook.local"
+
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('SELECT id, is_active, is_admin, account_status, force_password_change FROM users WHERE email = ?', (email,))
+        user = c.fetchone()
+
+        if not user:
+            random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+            hashed = hashpw(random_password.encode('utf-8'), gensalt())
+            password_history_json = json.dumps([hashed.decode('utf-8')])
+            
+            c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 1, ?, ?, ?, 0)', 
+                      (username, hashed, email, 'active', password_history_json, datetime.now().isoformat()))
+            user_id = c.lastrowid
+            conn.commit()
+            is_admin = 0
+            force_password_change = 0
+        else:
+            user_id = user[0]
+            is_active = user[1] if user[1] is not None else 0
+            is_admin = user[2] if user[2] is not None else 0
+            account_status = user[3] if user[3] and len(user) > 3 else 'active'
+            force_password_change = user[4] if len(user) > 4 and user[4] is not None else 0
+
+            if account_status != 'active' or is_active == 0:
+                conn.close()
+                return jsonify({'error': 'Account is inactive or pending approval'}), 403
+
+        conn.close()
+
+        token_payload = {
+            'user_id': user_id,
+            'is_admin': bool(is_admin),
+            'exp': datetime.now(timezone.utc) + timedelta(hours=SESSION_TIMEOUT_HOURS)
+        }
+        jwt_token = jwt.encode(token_payload, app.config['SECRET_KEY'])
+        
+        return jsonify({
+            'token': jwt_token,
+            'user_id': user_id,
+            'username': username,
+            'is_admin': bool(is_admin),
+            'force_password_change': bool(force_password_change),
+            'expires_in': SESSION_TIMEOUT_HOURS * 3600
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- WebAuthn / Passkey Endpoints ---
+
+def get_rp_info():
+    rp_origin = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    rp_id = urlparse(rp_origin).hostname
+    return rp_id, rp_origin
+
+@app.route('/passkey/register/start', methods=['POST'])
+@token_required
+def passkey_register_start(current_user):
+    user_id = current_user['id']
+    username = current_user['username']
+    
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT credential_id FROM webauthn_credentials WHERE user_id = ?', (user_id,))
+    existing_credentials = [{'id': base64url_to_bytes(row[0]), 'type': 'public-key'} for row in c.fetchall()]
+    conn.close()
+
+    rp_id, rp_origin = get_rp_info()
+
+    options = generate_registration_options(
+        rp_id=rp_id,
+        rp_name="ForensicToolProject",
+        user_id=str(user_id).encode('utf-8'),
+        user_name=username,
+        user_display_name=username,
+        exclude_credentials=existing_credentials,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
+    )
+
+    challenge_id = str(uuid.uuid4())
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge, user_id) VALUES (?, ?, ?)', (challenge_id, options.challenge.decode('utf-8') if isinstance(options.challenge, bytes) else options.challenge, user_id))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"options": json.loads(options_to_json(options)), "challenge_id": challenge_id}), 200
+
+
+@app.route('/passkey/register/finish', methods=['POST'])
+@token_required
+def passkey_register_finish(current_user):
+    data = request.get_json()
+    challenge_id = data.get('challenge_id')
+    response_data = data.get('response')
+
+    if not challenge_id or not response_data:
+        return jsonify({'error': 'Missing challenge or response'}), 400
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT challenge, user_id FROM webauthn_challenges WHERE challenge_id = ?', (challenge_id,))
+    row = c.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Challenge not found or expired'}), 400
+        
+    expected_challenge, user_id = row
+    
+    if user_id != current_user['id']:
+        conn.close()
+        return jsonify({'error': 'Challenge user mismatch'}), 403
+
+    c.execute('DELETE FROM webauthn_challenges WHERE challenge_id = ?', (challenge_id,))
+    conn.commit()
+
+    rp_id, rp_origin = get_rp_info()
+
+    try:
+        verification = verify_registration_response(
+            credential=response_data,
+            expected_challenge=expected_challenge.encode('utf-8'),
+            expected_origin=rp_origin,
+            expected_rp_id=rp_id,
+        )
+        
+        c.execute('INSERT INTO webauthn_credentials (user_id, credential_id, public_key, sign_count) VALUES (?, ?, ?, ?)', 
+                  (user_id, verification.credential_id.decode('utf-8') if isinstance(verification.credential_id, bytes) else verification.credential_id, 
+                   verification.credential_public_key.decode('utf-8') if isinstance(verification.credential_public_key, bytes) else verification.credential_public_key, 
+                   verification.sign_count))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Passkey registered successfully'}), 200
+    except InvalidRegistrationResponse as e:
+        conn.close()
+        return jsonify({'error': f'Registration failed: {str(e)}'}), 400
+
+
+@app.route('/passkey/login/start', methods=['POST'])
+@limiter.limit("5 per minute")
+def passkey_login_start():
+    rp_id, rp_origin = get_rp_info()
+    
+    options = generate_authentication_options(
+        rp_id=rp_id,
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+
+    challenge_id = str(uuid.uuid4())
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge) VALUES (?, ?)', (challenge_id, options.challenge.decode('utf-8') if isinstance(options.challenge, bytes) else options.challenge))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"options": json.loads(options_to_json(options)), "challenge_id": challenge_id}), 200
+
+
+@app.route('/passkey/login/finish', methods=['POST'])
+@limiter.limit("5 per minute")
+def passkey_login_finish():
+    data = request.get_json()
+    challenge_id = data.get('challenge_id')
+    response_data = data.get('response')
+
+    if not challenge_id or not response_data:
+        return jsonify({'error': 'Missing challenge or response'}), 400
+
+    conn = sqlite3.connect('forensic.db')
+    c = conn.cursor()
+    c.execute('SELECT challenge FROM webauthn_challenges WHERE challenge_id = ?', (challenge_id,))
+    row = c.fetchone()
+    
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Challenge not found or expired'}), 400
+        
+    expected_challenge = row[0]
+    c.execute('DELETE FROM webauthn_challenges WHERE challenge_id = ?', (challenge_id,))
+    conn.commit()
+
+    credential_id = response_data.get('id')
+    if not credential_id:
+        conn.close()
+        return jsonify({'error': 'Missing credential id'}), 400
+
+    c.execute('SELECT id, user_id, public_key, sign_count FROM webauthn_credentials WHERE credential_id = ?', (credential_id,))
+    cred_row = c.fetchone()
+
+    if not cred_row:
+        conn.close()
+        return jsonify({'error': 'Unregistered passkey'}), 401
+
+    db_cred_id, user_id, public_key, sign_count = cred_row
+    
+    rp_id, rp_origin = get_rp_info()
+
+    try:
+        verification = verify_authentication_response(
+            credential=response_data,
+            expected_challenge=expected_challenge.encode('utf-8'),
+            expected_origin=rp_origin,
+            expected_rp_id=rp_id,
+            credential_public_key=public_key.encode('utf-8') if isinstance(public_key, str) else public_key,
+            credential_current_sign_count=sign_count,
+        )
+
+        c.execute('UPDATE webauthn_credentials SET sign_count = ? WHERE id = ?', (verification.new_sign_count, db_cred_id))
+        
+        c.execute('SELECT id, is_active, is_admin, account_status, force_password_change FROM users WHERE id = ?', (user_id,))
+        user = c.fetchone()
+        
+        if not user:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 401
+            
+        uid, is_active, is_admin, account_status, force_password_change = user
+        
+        if account_status != 'active' or is_active == 0:
+            conn.close()
+            return jsonify({'error': 'Account is inactive or pending approval'}), 403
+
+        conn.commit()
+        conn.close()
+        
+        token_payload = {
+            'user_id': uid,
+            'is_admin': bool(is_admin),
+            'exp': datetime.now(timezone.utc) + timedelta(hours=SESSION_TIMEOUT_HOURS)
+        }
+        jwt_token = jwt.encode(token_payload, app.config['SECRET_KEY'])
+        
+        return jsonify({
+            'message': 'Passkey login successful',
+            'token': jwt_token,
+            'user_id': uid,
+            'is_admin': bool(is_admin),
+            'force_password_change': bool(force_password_change),
+            'expires_in': SESSION_TIMEOUT_HOURS * 3600
+        }), 200
+
+    except InvalidAuthenticationResponse as e:
+        conn.close()
+        return jsonify({'error': f'Authentication failed: {str(e)}'}), 401
+    except Exception as e:
+        conn.close()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/search-x-posts', methods=['POST'])

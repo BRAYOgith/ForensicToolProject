@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
+import { startAuthentication } from '@simplewebauthn/browser';
 
 function LoginPage({ setIsAuthenticated }) {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -70,6 +71,104 @@ function LoginPage({ setIsAuthenticated }) {
     onSuccess: handleGoogleSuccess,
     onError: () => setError('Google Sign-In failed')
   });
+
+  const handlePasskeyLogin = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const startRes = await fetch(`${API_BASE}/passkey/login/start`, {
+        method: 'POST',
+      });
+      if (!startRes.ok) throw new Error('Failed to start passkey login');
+      const startData = await startRes.json();
+      
+      const asseResp = await startAuthentication(startData.options);
+      
+      const finishRes = await fetch(`${API_BASE}/passkey/login/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challenge_id: startData.challenge_id,
+          response: asseResp
+        })
+      });
+      
+      const data = await finishRes.json();
+      if (finishRes.ok) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user_id', data.user_id);
+        localStorage.setItem('is_admin', data.is_admin ? '1' : '0');
+
+        if (data.force_password_change) {
+          setAdminResetToken(data.token);
+          setMustResetAdminPassword(true);
+          setLoading(false);
+          return;
+        }
+
+        if (setIsAuthenticated) setIsAuthenticated(true);
+        navigate(data.is_admin ? '/admin' : '/', { replace: true });
+      } else {
+        setError(data.error || 'Passkey login failed');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Passkey login cancelled or failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFacebookLogin = () => {
+    if (!window.FB) {
+      setError('Facebook SDK not loaded yet. Please try again.');
+      return;
+    }
+    
+    window.FB.login((response) => {
+      if (response.status === 'connected') {
+        const accessToken = response.authResponse.accessToken;
+        submitFacebookToken(accessToken);
+      } else {
+        setError('Facebook login cancelled or failed.');
+      }
+    }, { scope: 'public_profile,email' });
+  };
+
+  const submitFacebookToken = async (accessToken) => {
+    setError('');
+    setSuccess('');
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/facebook-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user_id', data.user_id);
+        localStorage.setItem('is_admin', data.is_admin ? '1' : '0');
+
+        if (data.force_password_change) {
+          setAdminResetToken(data.token);
+          setMustResetAdminPassword(true);
+          setLoading(false);
+          return;
+        }
+
+        if (setIsAuthenticated) setIsAuthenticated(true);
+        navigate(data.is_admin ? '/admin' : '/', { replace: true });
+      } else {
+        setError(data.error || 'Facebook login failed');
+      }
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -732,15 +831,27 @@ function LoginPage({ setIsAuthenticated }) {
 
                 <button
                   type="button"
-                  onClick={() => alert('GitHub authentication coming soon')}
-                  className="flex items-center justify-center gap-3 px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl hover:border-accent hover:shadow-lg hover:shadow-accent/5 transition-all group"
+                  onClick={handleFacebookLogin}
+                  className="flex items-center justify-center gap-3 px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10 transition-all group"
                 >
-                  <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                  <svg className="w-5 h-5 group-hover:scale-110 transition-transform text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.469h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.469h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                   </svg>
-                  <span className="text-sm font-black text-[var(--text-primary)]">GitHub</span>
+                  <span className="text-sm font-black text-[var(--text-primary)]">Facebook</span>
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={handlePasskeyLogin}
+                className="w-full mt-4 flex items-center justify-center gap-3 px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group"
+              >
+                <svg className="w-5 h-5 group-hover:scale-110 transition-transform text-emerald-500" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12.65 10A5.99 5.99 0 0 0 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6a5.99 5.99 0 0 0 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                </svg>
+                <span className="text-sm font-black text-[var(--text-primary)]">Continue with Passkey</span>
+              </button>
+
             </form>
           )}
 

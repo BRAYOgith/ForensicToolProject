@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom';
+import { startRegistration } from '@simplewebauthn/browser';
 import { HelmetProvider } from 'react-helmet-async';
 import FetchPage from './FetchPage';
 import RetrievePage from './RetrievePage';
@@ -150,6 +151,43 @@ function MainLayout() {
     window.location.href = '/login';
   };
 
+  const handleEnrollPasskey = async () => {
+    try {
+      const startRes = await fetch(`${API_BASE}/passkey/register/start`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (!startRes.ok) throw new Error('Failed to start passkey registration');
+      const startData = await startRes.json();
+      
+      const attResp = await startRegistration(startData.options);
+      
+      const finishRes = await fetch(`${API_BASE}/passkey/register/finish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          challenge_id: startData.challenge_id,
+          response: attResp
+        })
+      });
+      
+      if (finishRes.ok) {
+        alert('Passkey successfully enrolled!');
+      } else {
+        const errorData = await finishRes.json();
+        alert(`Failed to enroll passkey: ${errorData.error}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Passkey enrollment failed or was cancelled.');
+    }
+  };
+
   const togglePwd = () => setIsPwdMode(prev => !prev);
 
   return (
@@ -202,6 +240,13 @@ function MainLayout() {
                     <Link to="/report" className="text-[var(--text-secondary)] hover:text-accent font-medium text-base transition-colors">Reports</Link>
                   </>
                 )}
+                <button
+                  onClick={handleEnrollPasskey}
+                  className="text-emerald-400 hover:text-emerald-600 font-medium text-base transition-colors ml-4"
+                  aria-label="Enroll Passkey"
+                >
+                  Enroll Passkey
+                </button>
                 <button
                   onClick={handleLogout}
                   className="text-red-400 hover:text-red-600 font-medium text-base transition-colors ml-4"
