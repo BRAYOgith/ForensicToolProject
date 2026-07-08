@@ -37,6 +37,8 @@ from webauthn.helpers.structs import (
     AuthenticatorAttachment,
 )
 from webauthn.helpers.exceptions import InvalidRegistrationResponse, InvalidAuthenticationResponse
+
+def _generate_pdf_safe(html_content, options=None):
     try:
         return pdfkit.from_string(html_content, False, options=options or {})
     except OSError as e:
