@@ -125,6 +125,13 @@ function LoginPage({ setIsAuthenticated }) {
       return;
     }
     
+    window.FB.init({
+      appId      : '2015392212441918',
+      cookie     : true,
+      xfbml      : true,
+      version    : 'v19.0'
+    });
+    
     window.FB.login((response) => {
       if (response.status === 'connected') {
         const accessToken = response.authResponse.accessToken;

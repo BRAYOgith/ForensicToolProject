@@ -1302,13 +1302,16 @@ def passkey_register_start(current_user):
     )
 
     challenge_id = str(uuid.uuid4())
+    options_dict = json.loads(options_to_json(options))
+    challenge_str = options_dict['challenge']
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge, user_id) VALUES (?, ?, ?)', (challenge_id, options.challenge.decode('utf-8') if isinstance(options.challenge, bytes) else options.challenge, user_id))
+    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge, user_id) VALUES (?, ?, ?)', (challenge_id, challenge_str, user_id))
     conn.commit()
     conn.close()
 
-    return jsonify({"options": json.loads(options_to_json(options)), "challenge_id": challenge_id}), 200
+    return jsonify({"options": options_dict, "challenge_id": challenge_id}), 200
 
 
 @app.route('/passkey/register/finish', methods=['POST'])
@@ -1373,13 +1376,16 @@ def passkey_login_start():
     )
 
     challenge_id = str(uuid.uuid4())
+    options_dict = json.loads(options_to_json(options))
+    challenge_str = options_dict['challenge']
+
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
-    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge) VALUES (?, ?)', (challenge_id, options.challenge.decode('utf-8') if isinstance(options.challenge, bytes) else options.challenge))
+    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge) VALUES (?, ?)', (challenge_id, challenge_str))
     conn.commit()
     conn.close()
 
-    return jsonify({"options": json.loads(options_to_json(options)), "challenge_id": challenge_id}), 200
+    return jsonify({"options": options_dict, "challenge_id": challenge_id}), 200
 
 
 @app.route('/passkey/login/finish', methods=['POST'])
