@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useGoogleLogin } from '@react-oauth/google';
 
 function LoginPage({ setIsAuthenticated }) {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -29,6 +30,46 @@ function LoginPage({ setIsAuthenticated }) {
 
   const API_BASE = window.location.hostname.includes('vercel.app') ? 'https://forensictoolproject.onrender.com' : 
                          window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://forensictoolproject.onrender.com';
+
+  const handleGoogleSuccess = async (tokenResponse) => {
+    setError('');
+    setSuccess('');
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/google-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenResponse.access_token }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user_id', data.user_id);
+        localStorage.setItem('is_admin', data.is_admin ? '1' : '0');
+
+        if (data.force_password_change) {
+          setAdminResetToken(data.token);
+          setMustResetAdminPassword(true);
+          setLoading(false);
+          return;
+        }
+
+        if (setIsAuthenticated) setIsAuthenticated(true);
+        navigate(data.is_admin ? '/admin' : '/', { replace: true });
+      } else {
+        setError(data.error || 'Google login failed');
+      }
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginWithGoogle = useGoogleLogin({
+    onSuccess: handleGoogleSuccess,
+    onError: () => setError('Google Sign-In failed')
+  });
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -665,7 +706,7 @@ function LoginPage({ setIsAuthenticated }) {
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => alert('Google authentication coming soon')}
+                  onClick={() => loginWithGoogle()}
                   className="flex items-center justify-center gap-3 px-4 py-4 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl hover:border-accent hover:shadow-lg hover:shadow-accent/5 transition-all group"
                 >
                   <svg className="w-5 h-5 group-hover:scale-110 transition-transform" viewBox="0 0 24 24">

@@ -14,6 +14,10 @@ from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 from bcrypt import hashpw, checkpw, gensalt
 import pdfkit
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+import secrets
+import string
 import io
 import base64
 
@@ -1086,6 +1090,78 @@ def login():
         'force_password_change': True if force_password_change == 1 else False,
         'expires_in': SESSION_TIMEOUT_HOURS * 3600
     }), 200
+
+@app.route('/google-login', methods=['POST'])
+@limiter.limit("5 per minute")
+def google_login():
+    data = request.get_json()
+    token = data.get('token')
+    if not token:
+        return jsonify({'error': 'Token is required'}), 400
+
+    try:
+        client_id = os.getenv('Client_ID')
+        try:
+            idinfo = id_token.verify_oauth2_token(token, google_requests.Request(), client_id)
+        except ValueError:
+            import requests
+            resp = requests.get(f"https://www.googleapis.com/oauth2/v3/userinfo?access_token={token}")
+            if resp.status_code != 200:
+                raise ValueError("Invalid Google token")
+            idinfo = resp.json()
+
+        email = idinfo.get('email')
+        username = idinfo.get('name') or email.split('@')[0]
+
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('SELECT id, is_active, is_admin, account_status, force_password_change FROM users WHERE email = ?', (email,))
+        user = c.fetchone()
+
+        if not user:
+            random_password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+            hashed = hashpw(random_password.encode('utf-8'), gensalt())
+            password_history_json = json.dumps([hashed.decode('utf-8')])
+            
+            c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 1, ?, ?, ?, 0)', 
+                      (username, hashed, email, 'active', password_history_json, datetime.now().isoformat()))
+            user_id = c.lastrowid
+            conn.commit()
+            is_admin = 0
+            force_password_change = 0
+        else:
+            user_id = user[0]
+            is_active = user[1] if user[1] is not None else 0
+            is_admin = user[2] if user[2] is not None else 0
+            account_status = user[3] if user[3] and len(user) > 3 else 'active'
+            force_password_change = user[4] if len(user) > 4 and user[4] is not None else 0
+
+            if account_status != 'active' or is_active == 0:
+                conn.close()
+                return jsonify({'error': 'Account is inactive or pending approval'}), 403
+
+        conn.close()
+
+        token_payload = {
+            'user_id': user_id,
+            'is_admin': bool(is_admin),
+            'exp': datetime.now(timezone.utc) + timedelta(hours=SESSION_TIMEOUT_HOURS)
+        }
+        jwt_token = jwt.encode(token_payload, app.config['SECRET_KEY'])
+        
+        return jsonify({
+            'message': 'Login successful',
+            'token': jwt_token,
+            'user_id': user_id,
+            'is_admin': bool(is_admin),
+            'force_password_change': bool(force_password_change),
+            'expires_in': SESSION_TIMEOUT_HOURS * 3600
+        }), 200
+
+    except ValueError:
+        return jsonify({'error': 'Invalid Google token'}), 401
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/search-x-posts', methods=['POST'])
 @token_required
