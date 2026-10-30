@@ -1,37 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://forensic-tool-project.vercel.app/</loc>
+    <loc>https://chainforensix.com/</loc>
     <lastmod>2026-01-14</lastmod>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://forensic-tool-project.vercel.app/methodology</loc>
+    <loc>https://chainforensix.com/methodology</loc>
     <lastmod>2026-01-14</lastmod>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://forensic-tool-project.vercel.app/docs</loc>
+    <loc>https://chainforensix.com/docs</loc>
     <lastmod>2026-01-14</lastmod>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://forensic-tool-project.vercel.app/login</loc>
+    <loc>https://chainforensix.com/login</loc>
     <lastmod>2026-01-14</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://forensic-tool-project.vercel.app/privacy</loc>
+    <loc>https://chainforensix.com/privacy</loc>
     <lastmod>2026-01-14</lastmod>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://forensic-tool-project.vercel.app/terms</loc>
+    <loc>https://chainforensix.com/terms</loc>
     <lastmod>2026-01-14</lastmod>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://forensic-tool-project.vercel.app/use-cases</loc>
+    <loc>https://chainforensix.com/use-cases</loc>
     <lastmod>2026-01-20</lastmod>
     <priority>0.8</priority>
   </url>

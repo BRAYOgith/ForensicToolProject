@@ -7,7 +7,7 @@ const PrivacyPage = () => {
             <SEO
                 title="Privacy Policy"
                 description="ChainForensix Privacy Policy. Learn how we collect, use, and protect your data during forensic investigations."
-                canonical="https://forensic-tool-project.vercel.app/privacy"
+                canonical="https://chainforensix.com/privacy"
             />
             <div className="max-w-4xl mx-auto">
                 <h1 className="text-4xl font-heading font-bold mb-8 border-b border-[var(--border-color)] pb-4">Privacy Policy</h1>

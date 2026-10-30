@@ -6,7 +6,7 @@ const MethodologyPage = () => {
             <SEO
                 title="Forensic Methodology"
                 description="A deterministic, three-stage process to Capture, Analyze, and Preserve digital evidence. We establish a verifiable chain of custody."
-                canonical="https://forensic-tool-project.vercel.app/methodology"
+                canonical="https://chainforensix.com/methodology"
             />
             {/* Header / Hero Partial */}
             <header className="bg-[var(--bg-secondary)] py-16 border-b border-[var(--border-color)]">

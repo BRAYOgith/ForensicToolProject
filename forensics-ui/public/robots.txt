@@ -15,4 +15,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://forensic-tool-project.vercel.app/sitemap.xml
+Sitemap: https://chainforensix.com/sitemap.xml

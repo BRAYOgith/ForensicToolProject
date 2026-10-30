@@ -29,8 +29,9 @@ function LoginPage({ setIsAuthenticated }) {
 
   const navigate = useNavigate();
 
-  const API_BASE = window.location.hostname.includes('vercel.app') ? 'https://forensictoolproject.onrender.com' : 
-                         window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? 'http://localhost:5000' : 'https://forensictoolproject.onrender.com';
+  const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000'
+    : 'https://forensictoolproject.onrender.com';
 
   const handleGoogleSuccess = async (tokenResponse) => {
     setError('');

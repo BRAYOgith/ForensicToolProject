@@ -9,7 +9,7 @@ const UseCasesPage = () => {
                 title="Use Cases & Applications"
                 description="Explore how ChainForensix aids Justice Seekers, Legal Counsel, and OSINT investigators in securing immutable social media evidence."
                 keywords="Forensics Use Cases, Legal Evidence, Digital Harassment, OSINT Investigation, Defamation Lawsuit Support"
-                canonical="https://forensic-tool-project.vercel.app/use-cases"
+                canonical="https://chainforensix.com/use-cases"
             />
 
             <header className="bg-[var(--bg-secondary)] py-16 border-b border-[var(--border-color)]">

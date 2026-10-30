@@ -2477,6 +2477,11 @@ h6 {
   color: rgb(10 25 47 / var(--tw-text-opacity, 1));
 }
 
+.text-\[\#1877F2\] {
+  --tw-text-opacity: 1;
+  color: rgb(24 119 242 / var(--tw-text-opacity, 1));
+}
+
 .text-\[var\(--accent-cyan\)\] {
   color: var(--accent-cyan);
 }
@@ -3158,12 +3163,22 @@ h6 {
   border-color: var(--text-primary);
 }
 
+.hover\:border-blue-500:hover {
+  --tw-border-opacity: 1;
+  border-color: rgb(59 130 246 / var(--tw-border-opacity, 1));
+}
+
 .hover\:border-cyan-500\/30:hover {
   border-color: rgb(6 182 212 / 0.3);
 }
 
 .hover\:border-cyan-500\/50:hover {
   border-color: rgb(6 182 212 / 0.5);
+}
+
+.hover\:border-emerald-500:hover {
+  --tw-border-opacity: 1;
+  border-color: rgb(16 185 129 / var(--tw-border-opacity, 1));
 }
 
 .hover\:border-gray-500\/50:hover {
@@ -3310,6 +3325,11 @@ h6 {
   color: rgb(34 211 238 / var(--tw-text-opacity, 1));
 }
 
+.hover\:text-emerald-600:hover {
+  --tw-text-opacity: 1;
+  color: rgb(5 150 105 / var(--tw-text-opacity, 1));
+}
+
 .hover\:text-red-300:hover {
   --tw-text-opacity: 1;
   color: rgb(252 165 165 / var(--tw-text-opacity, 1));
@@ -3344,6 +3364,16 @@ h6 {
   --tw-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --tw-shadow-colored: 0 4px 6px -1px var(--tw-shadow-color), 0 2px 4px -2px var(--tw-shadow-color);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.hover\:shadow-blue-500\/10:hover {
+  --tw-shadow-color: rgb(59 130 246 / 0.1);
+  --tw-shadow: var(--tw-shadow-colored);
+}
+
+.hover\:shadow-emerald-500\/10:hover {
+  --tw-shadow-color: rgb(16 185 129 / 0.1);
+  --tw-shadow: var(--tw-shadow-colored);
 }
 
 .hover\:shadow-purple-500\/20:hover {

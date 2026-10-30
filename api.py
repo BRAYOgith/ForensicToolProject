@@ -107,6 +107,8 @@ if HAS_LOCAL_AI:
 app = Flask(__name__)
 
 allowed_origins = [
+    "https://chainforensix.com",
+    "https://www.chainforensix.com",
     "https://forensic-tool-project.vercel.app",
     "https://forensictoolproject.onrender.com"
 ]
@@ -390,7 +392,7 @@ headers = {"Authorization": f"Bearer {bearer_token}"}
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 def send_forensic_email(email, token, email_type="activation"):
-    frontend_url = os.getenv("FRONTEND_URL", "https://forensic-tool-project.vercel.app")
+    frontend_url = os.getenv("FRONTEND_URL", "https://chainforensix.com")
     endpoint = 'activate' if email_type == 'activation' else 'reset-password'
     link = f"{frontend_url}/{endpoint}?token={token}"
 
@@ -786,7 +788,7 @@ def activate():
             logger.warning(f"Activation failed: User ID {user_id} not found in database.")
             return f"<h2 style='color:red;'>Invalid user (ID: {user_id}) - Please re-register or use the correct link</h2>", 400
 
-        frontend_url = os.getenv('FRONTEND_URL', 'https://forensic-tool-project.vercel.app')
+        frontend_url = os.getenv('FRONTEND_URL', 'https://chainforensix.com')
         if result[0] == 1:
             conn.close()
             return f"""

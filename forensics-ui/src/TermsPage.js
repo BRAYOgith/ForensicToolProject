@@ -7,7 +7,7 @@ const TermsPage = () => {
             <SEO
                 title="Terms of Service"
                 description="ChainForensix Terms of Service. User agreement for accessing our digital forensic tools and blockchain anchoring services."
-                canonical="https://forensic-tool-project.vercel.app/terms"
+                canonical="https://chainforensix.com/terms"
             />
             <div className="max-w-4xl mx-auto">
                 <h1 className="text-4xl font-heading font-bold mb-8 border-b border-[var(--border-color)] pb-4">Terms of Service</h1>

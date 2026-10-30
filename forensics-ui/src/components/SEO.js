@@ -5,7 +5,7 @@ const SEO = ({ title, description, keywords, canonical, type = 'website', image 
     const siteTitle = 'ChainForensix | Forensic X Post Tool';
     const currentTitle = title ? `${title} | ChainForensix` : siteTitle;
     const currentDescription = description || 'ChainForensix: The premier Forensic X post tool. Capture, analyze, and secure digital evidence on the blockchain.';
-    const currentUrl = canonical || 'https://forensic-tool-project.vercel.app/';
+    const currentUrl = canonical || 'https://chainforensix.com/';
 
     return (
         <Helmet>

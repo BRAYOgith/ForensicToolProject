@@ -7,7 +7,7 @@ const DocumentationPage = () => {
              <SEO
                 title="Documentation & Usage"
                 description="Technical resources for digital investigators, legal professionals, and developers using ChainForensix for X post preservation."
-                canonical="https://forensic-tool-project.vercel.app/docs"
+                canonical="https://chainforensix.com/docs"
             />
 
             {/* Header / Hero */}
@@ -185,7 +185,7 @@ const DocumentationPage = () => {
                         If you are using ChainForensix in an academic paper or forensic report, please use the following citation format:
                     </p>
                     <div className="bg-[var(--text-primary)] text-[var(--bg-color)] p-6 rounded-lg font-mono text-sm overflow-x-auto border border-transparent">
-                        Njoki, B. (2026). ChainForensix: A Blockchain-Based Forensic Tool for X Post Preservation (v1.0) [Software]. Available at https://forensic-tool-project.vercel.app
+                        Njoki, B. (2026). ChainForensix: A Blockchain-Based Forensic Tool for X Post Preservation (v1.0) [Software]. Available at https://chainforensix.com
                     </div>
                 </section>
 
