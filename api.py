@@ -289,37 +289,49 @@ def predict_defamatory(text):
     use_hf = is_prod or not HAS_LOCAL_AI or os.getenv("USE_HF_API") == "true" or model is None
 
     confidences = [0.0, 0.0, 0.0]
+    hf_success = False
+
     if use_hf:
         logger.info("Running inference via Hugging Face API...")
-        try:
-            API_URL = "https://api-inference.huggingface.co/models/Brayo44/afro_xlmr_forensics"
-            # Try specific token, then generic token, then none
-            hf_token = os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN')
-            headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
-            
-            payload = {"inputs": text, "options": {"wait_for_model": True}}
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=20)
-            
-            if response.status_code == 200:
-                output = response.json()
-                # Afro-XLMR typically returns a list of label/score dicts
-                # Label mapping: LABEL_0=Safe, LABEL_1=Defamatory, LABEL_2=Hate Speech
-                inner = output[0] if isinstance(output, list) and isinstance(output[0], list) else output
-                if isinstance(inner, list):
-                    for item in inner:
-                        label_idx = int(item['label'].split('_')[-1])
-                        if label_idx < 3:
-                            confidences[label_idx] = item['score']
+        hf_token = os.getenv('HF_TOKEN') or os.getenv('HUGGINGFACE_TOKEN')
+        headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+        payload = {"inputs": text, "options": {"wait_for_model": True}}
+
+        endpoints = [
+            "https://router.huggingface.co/hf-inference/models/Brayo44/afro_xlmr_forensics",
+            "https://api-inference.huggingface.co/models/Brayo44/afro_xlmr_forensics"
+        ]
+
+        for api_url in endpoints:
+            try:
+                response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+                
+                # If model is cold/loading (503), wait and retry once
+                if response.status_code == 503:
+                    wait_time = response.json().get('estimated_time', 15) if response.headers.get('content-type', '').startswith('application/json') else 15
+                    wait_seconds = min(int(wait_time), 20)
+                    logger.info(f"Model is loading on HF. Waiting {wait_seconds}s before retry...")
+                    time.sleep(wait_seconds)
+                    response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+
+                if response.status_code == 200:
+                    output = response.json()
+                    inner = output[0] if isinstance(output, list) and isinstance(output[0], list) else output
+                    if isinstance(inner, list):
+                        for item in inner:
+                            label_idx = int(item['label'].split('_')[-1])
+                            if label_idx < 3:
+                                confidences[label_idx] = float(item['score'])
+                        hf_success = True
+                        break
+                    else:
+                        logger.warning(f"Unexpected HF output format from {api_url}: {output}")
                 else:
-                    logger.error(f"Unexpected HF API output format: {output}")
-                    return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Unexpected analysis result format."}
-            else:
-                logger.error(f"HF API Error ({response.status_code}): {response.text}")
-                return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Inference API currently unavailable."}
-        except Exception as e:
-            logger.error(f"HF API Failed: {e}")
-            return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Network error during analysis."}
-    else:
+                    logger.warning(f"HF API {api_url} returned status {response.status_code}: {response.text[:200]}")
+            except Exception as e:
+                logger.warning(f"HF API endpoint {api_url} failed: {e}")
+
+    if not use_hf:
         # Local Inference
         try:
             cleaned_text = clean_for_ai(text)
@@ -328,15 +340,32 @@ def predict_defamatory(text):
                 outputs = model(**inputs)
                 prob = torch.nn.functional.softmax(outputs.logits, dim=-1)
                 confidences = prob[0].tolist()
+                hf_success = True
         except Exception as e:
             logger.error(f"Local Inference Failed: {e}")
-            return {"is_defamatory": False, "category": "Error", "confidence": 0.0, "justification": "Local model execution failed."}
 
     # Common Logic for Verdict and Justification
     categories = ["Safe", "Defamatory", "Hate Speech"]
     HATE_THRESHOLD = 0.45
     DEFAM_THRESHOLD = 0.25
-    
+    markers = extract_forensic_markers(text)
+
+    # If neural inference was unavailable (missing HF_TOKEN, cold start timeout, or connection error),
+    # run intelligent Lexicon / Heuristic Forensic Classification as fallback so user is never stranded
+    if not hf_success:
+        logger.info("Executing Lexicon Forensic Fallback classifier...")
+        ncic_count = len(markers.get('ncic', []))
+        sec_count = len(markers.get('security', []))
+        defam_count = len(markers.get('defamatory', []))
+        safe_count = len(markers.get('safe', []))
+
+        hate_score = min(ncic_count * 0.4 + sec_count * 0.45, 0.95)
+        defam_score = min(defam_count * 0.35, 0.90)
+        safe_score = max(0.85 - (hate_score + defam_score), 0.10) if (hate_score > 0 or defam_score > 0) else min(0.65 + safe_count * 0.15, 0.98)
+
+        total = hate_score + defam_score + safe_score
+        confidences = [safe_score / total, defam_score / total, hate_score / total]
+
     if confidences[2] > HATE_THRESHOLD:
         top_class = 2
     elif confidences[1] > DEFAM_THRESHOLD:
@@ -380,7 +409,7 @@ def predict_defamatory(text):
         "justification": all_justifications[result_category.lower().replace(" ", "_")],
         "all_scores": {"safe": confidences[0], "defamatory": confidences[1], "hate_speech": confidences[2]},
         "all_justifications": all_justifications,
-        "technical_justification": f"{'HF-Cloud' if use_hf else 'Local-AfroXLMR'} analyzed {len(text)} chars. Markers: {sum(len(v) for v in markers.values())}."
+        "technical_justification": f"{'HF-Cloud' if (use_hf and hf_success) else 'Lexicon-Fallback' if not hf_success else 'Local-AfroXLMR'} analyzed {len(text)} chars. Markers: {sum(len(v) for v in markers.values())}."
     }
 
 bearer_token = os.getenv("X_BEARER_TOKEN")
