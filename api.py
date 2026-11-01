@@ -30,6 +30,7 @@ from webauthn import (
     options_to_json,
     base64url_to_bytes,
 )
+from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
     UserVerificationRequirement,
@@ -1272,56 +1273,87 @@ def facebook_login():
 
 def get_rp_info():
     rp_origin = request.headers.get('Origin')
+    if not rp_origin and request.referrer:
+        parsed = urlparse(request.referrer)
+        rp_origin = f"{parsed.scheme}://{parsed.netloc}"
     if not rp_origin:
-        rp_origin = os.getenv('FRONTEND_URL', 'http://localhost:3000')
-    rp_id = urlparse(rp_origin).hostname
+        rp_origin = os.getenv('FRONTEND_URL', 'https://chainforensix.com')
+    rp_origin = rp_origin.rstrip('/')
+    rp_id = urlparse(rp_origin).hostname or 'chainforensix.com'
     return rp_id, rp_origin
+
+def get_allowed_webauthn_origins(rp_origin):
+    origins = [
+        rp_origin,
+        "https://chainforensix.com",
+        "https://www.chainforensix.com",
+        "https://forensic-tool-project.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ]
+    return list(set([o.rstrip('/') for o in origins if o]))
 
 @app.route('/passkey/register/start', methods=['POST'])
 @token_required
 def passkey_register_start(current_user):
-    user_id = current_user['id']
-    username = current_user['username']
-    
-    conn = sqlite3.connect('forensic.db')
-    c = conn.cursor()
-    c.execute('SELECT credential_id FROM webauthn_credentials WHERE user_id = ?', (user_id,))
-    existing_credentials = [{'id': base64url_to_bytes(row[0]), 'type': 'public-key'} for row in c.fetchall()]
-    conn.close()
+    try:
+        user_id = current_user if isinstance(current_user, int) else current_user.get('id')
+        
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('SELECT username FROM users WHERE id = ?', (user_id,))
+        u_row = c.fetchone()
+        if not u_row:
+            conn.close()
+            return jsonify({'error': 'User not found'}), 404
+        username = u_row[0]
 
-    rp_id, rp_origin = get_rp_info()
+        c.execute('SELECT credential_id FROM webauthn_credentials WHERE user_id = ?', (user_id,))
+        existing_credentials = []
+        for row in c.fetchall():
+            if row[0]:
+                try:
+                    existing_credentials.append({'id': base64url_to_bytes(row[0]), 'type': 'public-key'})
+                except Exception:
+                    pass
+        conn.close()
 
-    options = generate_registration_options(
-        rp_id=rp_id,
-        rp_name="ForensicToolProject",
-        user_id=str(user_id).encode('utf-8'),
-        user_name=username,
-        user_display_name=username,
-        exclude_credentials=existing_credentials,
-        authenticator_selection=AuthenticatorSelectionCriteria(
-            authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-            resident_key=ResidentKeyRequirement.REQUIRED,
-            user_verification=UserVerificationRequirement.PREFERRED,
-        ),
-    )
+        rp_id, rp_origin = get_rp_info()
 
-    challenge_id = str(uuid.uuid4())
-    options_dict = json.loads(options_to_json(options))
-    challenge_str = options_dict['challenge']
+        options = generate_registration_options(
+            rp_id=rp_id,
+            rp_name="ChainForensix",
+            user_id=str(user_id).encode('utf-8'),
+            user_name=username,
+            user_display_name=username,
+            exclude_credentials=existing_credentials,
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                resident_key=ResidentKeyRequirement.PREFERRED,
+                user_verification=UserVerificationRequirement.PREFERRED,
+            ),
+        )
 
-    conn = sqlite3.connect('forensic.db')
-    c = conn.cursor()
-    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge, user_id) VALUES (?, ?, ?)', (challenge_id, challenge_str, user_id))
-    conn.commit()
-    conn.close()
+        challenge_id = str(uuid.uuid4())
+        options_dict = json.loads(options_to_json(options))
+        challenge_str = options_dict['challenge']
 
-    return jsonify({"options": options_dict, "challenge_id": challenge_id}), 200
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge, user_id) VALUES (?, ?, ?)', (challenge_id, challenge_str, user_id))
+        conn.commit()
+        conn.close()
+
+        return jsonify({"options": options_dict, "challenge_id": challenge_id}), 200
+    except Exception as e:
+        logger.error(f"Error in passkey_register_start: {e}")
+        return jsonify({'error': f'Failed to start passkey registration: {str(e)}'}), 500
 
 
 @app.route('/passkey/register/finish', methods=['POST'])
 @token_required
 def passkey_register_finish(current_user):
-    data = request.get_json()
+    user_id_current = current_user if isinstance(current_user, int) else current_user.get('id')
+    data = request.get_json() or {}
     challenge_id = data.get('challenge_id')
     response_data = data.get('response')
 
@@ -1339,7 +1371,7 @@ def passkey_register_finish(current_user):
         
     expected_challenge, user_id = row
     
-    if user_id != current_user['id']:
+    if user_id != user_id_current:
         conn.close()
         return jsonify({'error': 'Challenge user mismatch'}), 403
 
@@ -1347,55 +1379,67 @@ def passkey_register_finish(current_user):
     conn.commit()
 
     rp_id, rp_origin = get_rp_info()
+    allowed_origins = get_allowed_webauthn_origins(rp_origin)
 
     try:
         verification = verify_registration_response(
             credential=response_data,
             expected_challenge=expected_challenge.encode('utf-8'),
-            expected_origin=rp_origin,
+            expected_origin=allowed_origins,
             expected_rp_id=rp_id,
+            require_user_verification=False,
         )
         
+        cred_id_str = bytes_to_base64url(verification.credential_id)
+        pub_key_str = bytes_to_base64url(verification.credential_public_key)
+
         c.execute('INSERT INTO webauthn_credentials (user_id, credential_id, public_key, sign_count) VALUES (?, ?, ?, ?)', 
-                  (user_id, verification.credential_id.decode('utf-8') if isinstance(verification.credential_id, bytes) else verification.credential_id, 
-                   verification.credential_public_key.decode('utf-8') if isinstance(verification.credential_public_key, bytes) else verification.credential_public_key, 
-                   verification.sign_count))
+                  (user_id, cred_id_str, pub_key_str, verification.sign_count))
         conn.commit()
         conn.close()
         
         return jsonify({'message': 'Passkey registered successfully'}), 200
     except InvalidRegistrationResponse as e:
         conn.close()
+        logger.error(f"Passkey registration invalid: {e}")
         return jsonify({'error': f'Registration failed: {str(e)}'}), 400
+    except Exception as e:
+        conn.close()
+        logger.error(f"Passkey registration error: {e}")
+        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
 
 
 @app.route('/passkey/login/start', methods=['POST'])
 @limiter.limit("5 per minute")
 def passkey_login_start():
-    rp_id, rp_origin = get_rp_info()
-    
-    options = generate_authentication_options(
-        rp_id=rp_id,
-        user_verification=UserVerificationRequirement.PREFERRED,
-    )
+    try:
+        rp_id, rp_origin = get_rp_info()
+        
+        options = generate_authentication_options(
+            rp_id=rp_id,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        )
 
-    challenge_id = str(uuid.uuid4())
-    options_dict = json.loads(options_to_json(options))
-    challenge_str = options_dict['challenge']
+        challenge_id = str(uuid.uuid4())
+        options_dict = json.loads(options_to_json(options))
+        challenge_str = options_dict['challenge']
 
-    conn = sqlite3.connect('forensic.db')
-    c = conn.cursor()
-    c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge) VALUES (?, ?)', (challenge_id, challenge_str))
-    conn.commit()
-    conn.close()
+        conn = sqlite3.connect('forensic.db')
+        c = conn.cursor()
+        c.execute('INSERT INTO webauthn_challenges (challenge_id, challenge) VALUES (?, ?)', (challenge_id, challenge_str))
+        conn.commit()
+        conn.close()
 
-    return jsonify({"options": options_dict, "challenge_id": challenge_id}), 200
+        return jsonify({"options": options_dict, "challenge_id": challenge_id}), 200
+    except Exception as e:
+        logger.error(f"Error in passkey_login_start: {e}")
+        return jsonify({'error': f'Failed to start passkey login: {str(e)}'}), 500
 
 
 @app.route('/passkey/login/finish', methods=['POST'])
 @limiter.limit("5 per minute")
 def passkey_login_finish():
-    data = request.get_json()
+    data = request.get_json() or {}
     challenge_id = data.get('challenge_id')
     response_data = data.get('response')
 
@@ -1430,27 +1474,34 @@ def passkey_login_finish():
     db_cred_id, user_id, public_key, sign_count = cred_row
     
     rp_id, rp_origin = get_rp_info()
+    allowed_origins = get_allowed_webauthn_origins(rp_origin)
 
     try:
+        try:
+            raw_pub_key = base64url_to_bytes(public_key)
+        except Exception:
+            raw_pub_key = public_key.encode('utf-8') if isinstance(public_key, str) else public_key
+
         verification = verify_authentication_response(
             credential=response_data,
             expected_challenge=expected_challenge.encode('utf-8'),
-            expected_origin=rp_origin,
+            expected_origin=allowed_origins,
             expected_rp_id=rp_id,
-            credential_public_key=public_key.encode('utf-8') if isinstance(public_key, str) else public_key,
+            credential_public_key=raw_pub_key,
             credential_current_sign_count=sign_count,
+            require_user_verification=False,
         )
 
         c.execute('UPDATE webauthn_credentials SET sign_count = ? WHERE id = ?', (verification.new_sign_count, db_cred_id))
         
-        c.execute('SELECT id, is_active, is_admin, account_status, force_password_change FROM users WHERE id = ?', (user_id,))
+        c.execute('SELECT id, username, is_active, is_admin, account_status, force_password_change FROM users WHERE id = ?', (user_id,))
         user = c.fetchone()
         
         if not user:
             conn.close()
             return jsonify({'error': 'User not found'}), 401
             
-        uid, is_active, is_admin, account_status, force_password_change = user
+        uid, uname, is_active, is_admin, account_status, force_password_change = user
         
         if account_status != 'active' or is_active == 0:
             conn.close()
@@ -1461,6 +1512,7 @@ def passkey_login_finish():
         
         token_payload = {
             'user_id': uid,
+            'username': uname,
             'is_admin': bool(is_admin),
             'exp': datetime.now(timezone.utc) + timedelta(hours=SESSION_TIMEOUT_HOURS)
         }
@@ -1470,6 +1522,7 @@ def passkey_login_finish():
             'message': 'Passkey login successful',
             'token': jwt_token,
             'user_id': uid,
+            'username': uname,
             'is_admin': bool(is_admin),
             'force_password_change': bool(force_password_change),
             'expires_in': SESSION_TIMEOUT_HOURS * 3600
@@ -1477,9 +1530,11 @@ def passkey_login_finish():
 
     except InvalidAuthenticationResponse as e:
         conn.close()
+        logger.error(f"Passkey auth invalid: {e}")
         return jsonify({'error': f'Authentication failed: {str(e)}'}), 401
     except Exception as e:
         conn.close()
+        logger.error(f"Passkey auth error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/search-x-posts', methods=['POST'])

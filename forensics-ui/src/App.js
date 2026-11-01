@@ -159,7 +159,10 @@ function MainLayout() {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
       });
-      if (!startRes.ok) throw new Error('Failed to start passkey registration');
+      if (!startRes.ok) {
+        const errData = await startRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to start passkey registration');
+      }
       const startData = await startRes.json();
       
       const attResp = await startRegistration(startData.options);
@@ -179,12 +182,12 @@ function MainLayout() {
       if (finishRes.ok) {
         alert('Passkey successfully enrolled!');
       } else {
-        const errorData = await finishRes.json();
-        alert(`Failed to enroll passkey: ${errorData.error}`);
+        const errorData = await finishRes.json().catch(() => ({}));
+        alert(`Failed to enroll passkey: ${errorData.error || 'Unknown error'}`);
       }
     } catch (err) {
       console.error(err);
-      alert('Passkey enrollment failed or was cancelled.');
+      alert(err.message || 'Passkey enrollment failed or was cancelled.');
     }
   };
 
