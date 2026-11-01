@@ -39,16 +39,27 @@ from webauthn.helpers.structs import (
 )
 from webauthn.helpers.exceptions import InvalidRegistrationResponse, InvalidAuthenticationResponse
 
-def _generate_pdf_safe(html_content, options=None):
+def generate_pdf(html_content, options=None):
+    """Generate PDF using WeasyPrint (preferred, headless) or pdfkit."""
     try:
+        from weasyprint import HTML
+        return HTML(string=html_content).write_pdf()
+    except Exception as wp_err:
+        logger.warning(f"WeasyPrint PDF generation failed or not installed: {wp_err}")
+
+    try:
+        import pdfkit
         return pdfkit.from_string(html_content, False, options=options or {})
     except OSError as e:
         if 'wkhtmltopdf' in str(e).lower():
-            raise Exception("PDF generation unavailable: wkhtmltopdf not installed on server.")
-        raise
+            logger.error("wkhtmltopdf not installed on server.")
+        raise Exception("PDF generation failed: No suitable PDF renderer (WeasyPrint / wkhtmltopdf) available.")
     except Exception as e:
         logger.error(f"PDF generation failed: {e}")
         raise
+
+def _generate_pdf_safe(html_content, options=None):
+    return generate_pdf(html_content, options)
 
 # Initialize Logging first
 logging.basicConfig(level=logging.INFO, filename='forensic.log', format='%(asctime)s - %(levelname)s - %(message)s')

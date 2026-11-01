@@ -1,20 +1,21 @@
-# Use Python slim bullseye base for wkhtmltopdf compatibility
-FROM python:3.11-slim-bullseye
+# Use Python slim bookworm base (Debian 12 Bookworm - active LTS release)
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Install system dependencies for PDF generation and crypto
+# Install system dependencies for WeasyPrint (Cairo, Pango, GDK-Pixbuf) and crypto
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
         curl \
-        libgl1-mesa-glx \
         libgl1 \
         libglib2.0-0 \
-        libpango1.0-0 \
+        libpango-1.0-0 \
         libpangoft2-1.0-0 \
+        libcairo2 \
+        libgdk-pixbuf-2.0-0 \
+        shared-mime-info \
         libffi-dev \
-        wkhtmltopdf \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for layer caching
