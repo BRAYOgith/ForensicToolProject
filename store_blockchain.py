@@ -214,13 +214,24 @@ def store_evidence(evidence_data):
         eth_tx_hash_hex = f"0x{eth_tx_hash.hex()}" if not eth_tx_hash.hex().startswith("0x") else eth_tx_hash.hex()
         logger.info(f"Transaction sent: {eth_tx_hash_hex}")
 
-        receipt = web3.eth.wait_for_transaction_receipt(eth_tx_hash, timeout=300)
-        logger.info(f"Transaction mined. Status: {receipt.status}, Gas used: {receipt.gasUsed}")
+        receipt = None
+        try:
+            from web3.exceptions import TimeExhausted
+            receipt = web3.eth.wait_for_transaction_receipt(eth_tx_hash, timeout=12)
+            logger.info(f"Transaction mined. Status: {receipt.status}, Gas used: {receipt.gasUsed}")
+        except Exception:
+            logger.info(f"Transaction broadcasted and awaiting inclusion: {eth_tx_hash_hex}")
+            return {
+                "receipt": None,
+                "evidence_id": "pending",
+                "tx_hash": eth_tx_hash_hex,
+                "eth_tx_hash": eth_tx_hash_hex,
+                "status": "pending"
+            }
 
         if receipt.status == 0:
             return {"receipt": receipt, "evidence_id": -1, "tx_hash": None, "eth_tx_hash": eth_tx_hash_hex, "error": "Transaction reverted (status=0)"}
 
-        # Parse EvidenceStored event
         evidence_id = -1
         event_tx_hash = None
 
@@ -247,7 +258,8 @@ def store_evidence(evidence_data):
             "receipt": receipt,
             "evidence_id": evidence_id,
             "tx_hash": event_tx_hash or eth_tx_hash_hex,
-            "eth_tx_hash": eth_tx_hash_hex
+            "eth_tx_hash": eth_tx_hash_hex,
+            "status": "confirmed"
         }
 
     except Exception as e:

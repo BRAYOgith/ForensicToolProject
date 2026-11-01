@@ -165,9 +165,15 @@ def health():
     }), 200
 
 
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+raw_secret = os.getenv('SECRET_KEY')
+if not raw_secret:
+    if os.getenv('FLASK_ENV') == 'production' or os.getenv('RENDER'):
+        logger.warning("SECRET_KEY not set in production. Generating secure random key.")
+        raw_secret = secrets.token_hex(32)
+    else:
+        raw_secret = 'dev-secret-key-local-only'
+app.config['SECRET_KEY'] = raw_secret
 
-# Session security settings
 SESSION_TIMEOUT_HOURS = int(os.getenv('SESSION_TIMEOUT_HOURS', 24))
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
@@ -492,8 +498,191 @@ def send_forensic_email(email, token, email_type="activation"):
     except Exception as e:
         logger.error(f"Failed to send {email_type} email: {e}")
 
+DATABASE_URL = os.getenv('DATABASE_URL')
+SQLITE_DB_PATH = os.getenv('SQLITE_DB_PATH', 'forensic.db')
+
+try:
+    import psycopg2
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+
+class PostgresCursorWrapper:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def execute(self, query, params=None):
+        formatted_query = query.replace('?', '%s')
+        if params is None:
+            return self.cursor.execute(formatted_query)
+        if isinstance(params, list):
+            params = tuple(params)
+        return self.cursor.execute(formatted_query, params)
+
+    def executemany(self, query, seq_of_params):
+        formatted_query = query.replace('?', '%s')
+        return self.cursor.executemany(formatted_query, seq_of_params)
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+
+    def fetchmany(self, size=None):
+        return self.cursor.fetchmany(size) if size else self.cursor.fetchmany()
+
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
+    @property
+    def lastrowid(self):
+        return getattr(self.cursor, 'lastrowid', None)
+
+    def close(self):
+        self.cursor.close()
+
+    def __iter__(self):
+        return iter(self.cursor)
+
+class PostgresConnectionWrapper:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def cursor(self):
+        return PostgresCursorWrapper(self.conn.cursor())
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+_orig_sqlite_connect = sqlite3.connect
+
+def get_db(db_path=None):
+    if DATABASE_URL and HAS_PSYCOPG2:
+        pg_url = DATABASE_URL
+        if pg_url.startswith('postgres://'):
+            pg_url = pg_url.replace('postgres://', 'postgresql://', 1)
+        raw_conn = psycopg2.connect(pg_url)
+        return PostgresConnectionWrapper(raw_conn)
+    target = db_path if (db_path and db_path != 'forensic.db') else SQLITE_DB_PATH
+    return _orig_sqlite_connect(target)
+
+sqlite3.connect = get_db
+
 def init_db():
-    conn = sqlite3.connect('forensic.db')
+    if DATABASE_URL and HAS_PSYCOPG2:
+        pg_url = DATABASE_URL
+        if pg_url.startswith('postgres://'):
+            pg_url = pg_url.replace('postgres://', 'postgresql://', 1)
+        raw_conn = psycopg2.connect(pg_url)
+        cur = raw_conn.cursor()
+        cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT,
+            is_active INTEGER DEFAULT 0,
+            is_admin INTEGER DEFAULT 0,
+            account_status VARCHAR(50) DEFAULT 'active',
+            failed_attempts INTEGER DEFAULT 0,
+            lockout_until TEXT,
+            password_history TEXT,
+            last_password_change TEXT,
+            last_login TEXT,
+            last_login_ip TEXT,
+            force_password_change INTEGER DEFAULT 0,
+            recovery_key_hash TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS webauthn_credentials (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            credential_id TEXT UNIQUE NOT NULL,
+            public_key TEXT NOT NULL,
+            sign_count INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS webauthn_challenges (
+            challenge_id TEXT PRIMARY KEY,
+            challenge TEXT NOT NULL,
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS fetched_evidence (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER,
+            post_id TEXT,
+            content TEXT,
+            author_username TEXT,
+            created_at TEXT,
+            media_urls TEXT,
+            timestamp TEXT,
+            verified INTEGER,
+            is_defamatory INTEGER DEFAULT 0,
+            category TEXT,
+            confidence DOUBLE PRECISION,
+            engagement TEXT
+        );
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER,
+            action TEXT,
+            details TEXT,
+            ip_address TEXT,
+            timestamp TEXT,
+            prev_hash TEXT,
+            entry_hash TEXT
+        );
+        CREATE TABLE IF NOT EXISTS stored_evidence (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            evidence_id TEXT,
+            tx_hash TEXT,
+            eth_tx_hash TEXT,
+            post_id TEXT,
+            timestamp TEXT
+        );
+        CREATE TABLE IF NOT EXISTS requests_log (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            request_type TEXT,
+            timestamp TEXT
+        );
+        CREATE TABLE IF NOT EXISTS chatbot_conversations (
+            id SERIAL PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            message TEXT NOT NULL,
+            page_context TEXT,
+            escalated INTEGER DEFAULT 0,
+            timestamp TEXT
+        );
+        CREATE TABLE IF NOT EXISTS expert_appointments (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT,
+            topic TEXT,
+            preferred_date TEXT,
+            preferred_time TEXT,
+            message TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+        );
+        ''')
+        raw_conn.commit()
+        cur.close()
+        raw_conn.close()
+        return
+
+    conn = _orig_sqlite_connect(SQLITE_DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -514,7 +703,6 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )''')
     
-    # Migrate old databases - add missing columns
     columns = [row[1] for row in c.execute('PRAGMA table_info(users)').fetchall()]
     if 'is_admin' not in columns:
         c.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0')
@@ -615,7 +803,6 @@ def init_db():
         status TEXT DEFAULT 'pending',
         created_at TEXT
     )''')
-    c.execute('PRAGMA table_info(users)')
     columns = [row[1] for row in c.fetchall()]
     if 'is_active' not in columns:
         c.execute('ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 0')
@@ -639,10 +826,8 @@ def init_db():
     if 'post_id' not in columns:
         c.execute('ALTER TABLE stored_evidence ADD COLUMN post_id TEXT')
     
-    # Backfill is_defamatory for old records
     c.execute('UPDATE fetched_evidence SET is_defamatory = 0 WHERE is_defamatory IS NULL')
     
-    # Check if audit_logs exists (created above, but just in case of partial runs)
     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_logs'")
     if not c.fetchone():
         c.execute('''CREATE TABLE audit_logs (
@@ -656,7 +841,6 @@ def init_db():
             entry_hash TEXT
         )''')
     
-    # Add security columns to users table if missing
     try:
         columns = [row[1] for row in c.execute('PRAGMA table_info(users)').fetchall()]
         if 'failed_attempts' not in columns:
@@ -1812,15 +1996,13 @@ def fetch_x_post(current_user):
             "defamation": defamation_result
         }
 
-        # Encrypt sensitive fields for DB storage
+        post_data['forensic_disclaimer'] = 'Investigative decision-support indicator. Not a substitute for formal judicial review.'
         enc_content = encrypt_field(expanded_text)
         enc_author = encrypt_field(author_username)
         enc_media = encrypt_field(json.dumps(media_urls))
-        # Embed engagement metrics into content metadata string for full compliance storage
         engagement_json = json.dumps(post_data['engagement'])
         enc_engagement = encrypt_field(engagement_json)
 
-        # Store fetch in DB (encrypted)
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
         c.execute(
@@ -1953,13 +2135,13 @@ def store_evidence_endpoint(current_user):
         conn.close()
 
         log_audit(current_user, "store_evidence_success", f"ID: {evidence_id}, TX: {tx_hash}")
-        log_audit(current_user, "store_evidence_success", f"ID: {evidence_id}, TX: {tx_hash}")
         etherscan_url = f"https://sepolia.etherscan.io/tx/{eth_tx_hash}"
         return jsonify({
             "evidence_id": evidence_id,
             "tx_hash": tx_hash,
             "eth_tx_hash": eth_tx_hash,
-            "etherscan_url": etherscan_url
+            "etherscan_url": etherscan_url,
+            "status": result.get("status", "confirmed")
         }), 200
     except Exception as e:
         logger.error(f"Error storing evidence: {str(e)}")

@@ -26,3 +26,4 @@ pandas
 cryptography
 google-auth
 webauthn
+psycopg2-binary
