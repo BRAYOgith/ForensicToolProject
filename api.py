@@ -1411,9 +1411,10 @@ def passkey_register_finish(current_user):
     allowed_origins = get_allowed_webauthn_origins(rp_origin)
 
     try:
+        raw_expected_challenge = base64url_to_bytes(expected_challenge) if isinstance(expected_challenge, str) else expected_challenge
         verification = verify_registration_response(
             credential=response_data,
-            expected_challenge=expected_challenge.encode('utf-8'),
+            expected_challenge=raw_expected_challenge,
             expected_origin=allowed_origins,
             expected_rp_id=rp_id,
             require_user_verification=False,
@@ -1511,9 +1512,10 @@ def passkey_login_finish():
         except Exception:
             raw_pub_key = public_key.encode('utf-8') if isinstance(public_key, str) else public_key
 
+        raw_expected_challenge = base64url_to_bytes(expected_challenge) if isinstance(expected_challenge, str) else expected_challenge
         verification = verify_authentication_response(
             credential=response_data,
-            expected_challenge=expected_challenge.encode('utf-8'),
+            expected_challenge=raw_expected_challenge,
             expected_origin=allowed_origins,
             expected_rp_id=rp_id,
             credential_public_key=raw_pub_key,

@@ -83,7 +83,7 @@ function LoginPage({ setIsAuthenticated }) {
       if (!startRes.ok) throw new Error('Failed to start passkey login');
       const startData = await startRes.json();
       
-      const asseResp = await startAuthentication(startData.options);
+      const asseResp = await startAuthentication({ optionsJSON: startData.options });
       
       const finishRes = await fetch(`${API_BASE}/passkey/login/finish`, {
         method: 'POST',

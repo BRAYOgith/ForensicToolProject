@@ -165,7 +165,7 @@ function MainLayout() {
       }
       const startData = await startRes.json();
       
-      const attResp = await startRegistration(startData.options);
+      const attResp = await startRegistration({ optionsJSON: startData.options });
       
       const finishRes = await fetch(`${API_BASE}/passkey/register/finish`, {
         method: 'POST',
