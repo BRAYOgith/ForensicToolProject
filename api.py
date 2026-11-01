@@ -1584,7 +1584,7 @@ def search_x_posts(current_user):
     search_url = (
         f"https://api.x.com/2/tweets/search/recent?"
         f"query={requests.utils.quote(safe_query)}"
-        f"&tweet.fields=created_at,author_id,text,conversation_id,entities,public_metrics"
+        f"&tweet.fields=created_at,author_id,text,note_tweet,conversation_id,entities,public_metrics"
         f"&expansions=author_id"
         f"&user.fields=username"
         f"&max_results={max_results}"
@@ -1609,7 +1609,9 @@ def search_x_posts(current_user):
     if exact_match and 'data' in results:
         exact_posts = []
         for tweet in results['data']:
-            if tweet.get('text', '') == query:
+            note = tweet.get('note_tweet', {})
+            raw_text = note.get('text') if (note and note.get('text')) else tweet.get('text', '')
+            if raw_text == query or tweet.get('text', '') == query:
                 exact_posts.append(tweet)
 
         if exact_posts:
@@ -1626,9 +1628,14 @@ def search_x_posts(current_user):
         users = {u['id']: u['username'] for u in results.get('includes', {}).get('users', [])}
         for tweet in results['data']:
             metrics = tweet.get('public_metrics', {})
+            note = tweet.get('note_tweet', {})
+            full_text = note.get('text') if (note and note.get('text')) else tweet.get('text', '')
+            entities = note.get('entities') if (note and note.get('entities')) else tweet.get('entities', {})
+            urls = entities.get('urls', []) if entities else []
+            expanded_text = expand_urls(full_text, urls)
             posts.append({
                 "post_id": tweet['id'],
-                "text": tweet.get('text', ''),
+                "text": expanded_text,
                 "author_username": users.get(tweet['author_id'], 'unknown'),
                 "created_at": tweet['created_at'],
                 "engagement": {
@@ -1653,11 +1660,11 @@ def fetch_x_post(current_user):
         if not post_id:
             return jsonify({"error": "Post ID required"}), 400
 
-        # Request full context + entities + media
+        # Request full context + entities + media + note_tweet for full long-form content
         url = (
             f"https://api.x.com/2/tweets/{post_id}?"
             f"expansions=author_id,attachments.media_keys,in_reply_to_user_id,referenced_tweets.id"
-            f"&tweet.fields=created_at,conversation_id,text,entities,attachments,public_metrics"
+            f"&tweet.fields=created_at,conversation_id,text,note_tweet,entities,attachments,public_metrics"
             f"&user.fields=username"
             f"&media.fields=media_key,type,url,preview_image_url,variants"
         )
@@ -1667,15 +1674,41 @@ def fetch_x_post(current_user):
 
         response_data = response.json()
         tweet_data = response_data.get('data', {})
-        tweet_text = tweet_data.get('text', '')
+
+        # Extract full post text:
+        # X API v2 truncates posts > 280 characters in 'text' and puts full content in 'note_tweet.text'
+        note_tweet = tweet_data.get('note_tweet', {})
+        if note_tweet and note_tweet.get('text'):
+            tweet_text = note_tweet['text']
+            note_entities = note_tweet.get('entities', {})
+            urls = (note_entities.get('urls', []) or []) + (tweet_data.get('entities', {}).get('urls', []) or [])
+        else:
+            tweet_text = tweet_data.get('text', '')
+            entities = tweet_data.get('entities', {})
+            urls = entities.get('urls', []) or []
+
+        # If post is a Retweet, the text in data.text is truncated to 140 chars.
+        # Check referenced_tweets expansion to retrieve the full original tweet text.
+        for ref in tweet_data.get('referenced_tweets', []):
+            if ref.get('type') == 'retweeted':
+                ref_id = ref.get('id')
+                inc_tweets = response_data.get('includes', {}).get('tweets', [])
+                ref_tweet = next((t for t in inc_tweets if t.get('id') == ref_id), None)
+                if ref_tweet:
+                    ref_note = ref_tweet.get('note_tweet', {})
+                    ref_text = ref_note.get('text') if (ref_note and ref_note.get('text')) else ref_tweet.get('text', '')
+                    if ref_text:
+                        tweet_text = ref_text
+                        ref_entities = ref_note.get('entities', {}) if ref_note else ref_tweet.get('entities', {})
+                        ref_urls = ref_entities.get('urls', []) or []
+                        if ref_urls:
+                            urls = ref_urls
 
         # Get full thread if this is part of a conversation
         if 'conversation_id' in tweet_data and tweet_data['conversation_id'] != post_id:
             # Optional: fetch full thread (advanced, add if needed)
             pass
 
-        entities = tweet_data.get('entities', {})
-        urls = entities.get('urls', []) or []
         created_at = tweet_data.get('created_at', '')
         author_id = tweet_data.get('author_id', '')
         expanded_text = expand_urls(tweet_text, urls)
