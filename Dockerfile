@@ -3,10 +3,11 @@ FROM python:3.11-slim-bullseye
 
 WORKDIR /app
 
-# Install system dependencies for PDF generation and OCR
+# Install system dependencies for PDF generation and crypto
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         wget \
+        curl \
         libgl1-mesa-glx \
         libgl1 \
         libglib2.0-0 \
@@ -16,11 +17,11 @@ RUN apt-get update && \
         wkhtmltopdf \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (layer caching)
+# Copy requirements first for layer caching
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt || pip install -r requirements.txt || true
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all application code
 COPY . .
@@ -29,13 +30,9 @@ COPY . .
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
 
-# Expose port
+# Expose ports (Render uses 10000 by default, local dev uses 5000)
+EXPOSE 10000
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:5000/health || exit 1
-
-# Run gunicorn with production settings optimized for Render Free Tier (512MB RAM)
-CMD ["gunicorn", "-w", "1", "--threads", "2", "-b", "0.0.0.0:5000", "--timeout", "120", "--keep-alive", "5", "api:app"]
-
+# Run gunicorn bound dynamically to Render's $PORT (defaults to 10000 on Render, 5000 locally)
+CMD ["sh", "-c", "exec gunicorn -w 1 --threads 4 -b 0.0.0.0:${PORT:-10000} --timeout 120 --keep-alive 5 api:app"]

@@ -146,6 +146,13 @@ def set_security_headers(response):
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     return response
 
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "healthy",
+        "service": "ChainForensix API"
+    }), 200
+
 
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
 
