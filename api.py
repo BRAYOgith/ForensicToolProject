@@ -2426,6 +2426,37 @@ def get_tx_hash(current_user):
         logger.error(f"Failed to retrieve transaction hash: {str(e)}")
         return jsonify({"error": f"Failed to retrieve transaction hash: {str(e)}"}), 500
 
+def sanitize_report_dates(start_date, end_date):
+    today = datetime.now().date()
+    today_str = today.isoformat()
+    if start_date:
+        if '/' in start_date:
+            parts = start_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            start_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        try:
+            parsed_start = datetime.strptime(start_date[:10], '%Y-%m-%d').date()
+            if parsed_start > today:
+                start_date = today_str
+        except Exception:
+            pass
+    if end_date:
+        if '/' in end_date:
+            parts = end_date.split('/')
+            if len(parts[2]) == 2:
+                parts[2] = '20' + parts[2]
+            end_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        try:
+            parsed_end = datetime.strptime(end_date[:10], '%Y-%m-%d').date()
+            if parsed_end > today:
+                end_date = today_str
+        except Exception:
+            pass
+    if start_date and end_date and start_date > end_date:
+        start_date = end_date
+    return start_date, end_date
+
 @app.route('/report/<user_id>', methods=['GET'])
 @token_required
 def report(current_user, user_id):
@@ -2435,6 +2466,7 @@ def report(current_user, user_id):
 
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    start_date, end_date = sanitize_report_dates(start_date, end_date)
     category = request.args.get('category', 'all')
     action_type = request.args.get('action_type', 'all')
 
@@ -2665,6 +2697,7 @@ def generate_report(current_user, user_id):
 
     start_date = filters.get('start_date')
     end_date = filters.get('end_date')
+    start_date, end_date = sanitize_report_dates(start_date, end_date)
     category = filters.get('category', 'all')
     action_type = filters.get('action_type', 'all')
 
@@ -3540,6 +3573,7 @@ def admin_report_stats_preview(current_user):
     user_id = request.args.get('user_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    start_date, end_date = sanitize_report_dates(start_date, end_date)
     category = request.args.get('category')
     action_type = request.args.get('action_type')
 
@@ -3639,6 +3673,7 @@ def admin_report_evidence(current_user, user_id=None):
     user_id = request.args.get('user_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
+    start_date, end_date = sanitize_report_dates(start_date, end_date)
     category = request.args.get('category')
     action_type = request.args.get('action_type')
 
@@ -3734,6 +3769,7 @@ def admin_gen_rep(current_user):
 
     start_date = filters.get('start_date')
     end_date = filters.get('end_date')
+    start_date, end_date = sanitize_report_dates(start_date, end_date)
     category = filters.get('category', 'all')
     action_type = filters.get('action_type', 'all')
 

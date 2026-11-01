@@ -298,6 +298,13 @@ function AdminDashboard() {
   };
 
   const validateDates = (start, end) => {
+    const today = new Date().toISOString().split('T')[0];
+    if (start && start > today) {
+      return 'Start date cannot be in the future';
+    }
+    if (end && end > today) {
+      return 'End date cannot be in the future';
+    }
     if (start && end && new Date(start) > new Date(end)) {
       return 'Start date cannot be after end date';
     }
@@ -1125,12 +1132,14 @@ function AdminDashboard() {
                   <input
                     type="date"
                     value={activityFilters.start_date}
+                    max={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setActivityFilters({ ...activityFilters, start_date: e.target.value })}
                     className="w-full bg-[var(--bg-color)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-cyan)] transition-all"
                   />
                   <input
                     type="date"
                     value={activityFilters.end_date}
+                    max={new Date().toISOString().split('T')[0]}
                     onChange={(e) => setActivityFilters({ ...activityFilters, end_date: e.target.value })}
                     className="w-full bg-[var(--bg-color)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-sm font-bold text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-cyan)] transition-all"
                   />
@@ -1373,6 +1382,7 @@ function AdminDashboard() {
                       <input
                         type="date"
                         value={reportFilters.start_date}
+                        max={new Date().toISOString().split('T')[0]}
                         onChange={(e) => handleReportFilterChange('start_date', e.target.value)}
                         className="w-full bg-[var(--bg-color)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
                       />
@@ -1385,6 +1395,7 @@ function AdminDashboard() {
                       <input
                         type="date"
                         value={reportFilters.end_date}
+                        max={new Date().toISOString().split('T')[0]}
                         onChange={(e) => handleReportFilterChange('end_date', e.target.value)}
                         className="w-full bg-[var(--bg-color)] border border-[var(--border-color)] rounded-xl px-4 py-3 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
                       />

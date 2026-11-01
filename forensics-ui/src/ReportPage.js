@@ -109,7 +109,15 @@ function ReportPage() {
     fetchReportData({});
   }, [navigate]);
 
+  const todayStr = new Date().toISOString().split('T')[0];
+
   const validateDates = (start, end) => {
+    if (start && start > todayStr) {
+      return 'Start date cannot be in the future';
+    }
+    if (end && end > todayStr) {
+      return 'End date cannot be in the future';
+    }
     if (start && end && new Date(start) > new Date(end)) {
       return 'Start date cannot be after end date';
     }
@@ -579,6 +587,7 @@ function ReportPage() {
                   <input 
                     type="date" 
                     value={filters.start_date}
+                    max={todayStr}
                     onChange={(e) => handleFilterChange('start_date', e.target.value)}
                     className="w-full bg-[#0A192F] border border-gray-600 rounded-xl px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
                   />
@@ -589,6 +598,7 @@ function ReportPage() {
                   <input 
                     type="date" 
                     value={filters.end_date}
+                    max={todayStr}
                     onChange={(e) => handleFilterChange('end_date', e.target.value)}
                     className="w-full bg-[#0A192F] border border-gray-600 rounded-xl px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
                   />
