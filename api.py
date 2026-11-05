@@ -510,9 +510,29 @@ except ImportError:
 class PostgresCursorWrapper:
     def __init__(self, cursor):
         self.cursor = cursor
+        self._lastrowid = None
 
     def execute(self, query, params=None):
         formatted_query = query.replace('?', '%s')
+        clean_q = formatted_query.strip()
+        if clean_q.upper().startswith('INSERT INTO') and 'RETURNING' not in clean_q.upper():
+            q_returning = clean_q.rstrip(';') + ' RETURNING id'
+            try:
+                if params is None:
+                    res = self.cursor.execute(q_returning)
+                else:
+                    p = tuple(params) if isinstance(params, list) else params
+                    res = self.cursor.execute(q_returning, p)
+                try:
+                    row = self.cursor.fetchone()
+                    if row:
+                        self._lastrowid = row[0]
+                except Exception:
+                    self._lastrowid = None
+                return res
+            except Exception:
+                pass
+
         if params is None:
             return self.cursor.execute(formatted_query)
         if isinstance(params, list):
@@ -538,6 +558,8 @@ class PostgresCursorWrapper:
 
     @property
     def lastrowid(self):
+        if self._lastrowid is not None:
+            return self._lastrowid
         return getattr(self.cursor, 'lastrowid', None)
 
     def close(self):
@@ -968,7 +990,7 @@ def register():
         return jsonify({'error': validation_error}), 400
 
     hashed = hashpw(password.encode('utf-8'), gensalt())
-    password_history_json = json.dumps([hashed.decode('utf-8')])  # Store hash, not plain password
+    password_history_json = json.dumps([hashed.decode('utf-8')])
     
     conn = sqlite3.connect('forensic.db')
     c = conn.cursor()
@@ -976,9 +998,15 @@ def register():
         c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 0, ?, ?, ?, 0)', 
                   (username, hashed, email, 'pending', password_history_json, datetime.now().isoformat()))
         user_id = c.lastrowid
+        if not user_id:
+            c.execute('SELECT id FROM users WHERE username = ?', (username,))
+            row = c.fetchone()
+            if row:
+                user_id = row[0]
         conn.commit()
         activation_token = jwt.encode({
             'user_id': user_id,
+            'email': email,
             'exp': datetime.now(timezone.utc) + timedelta(hours=1)
         }, app.config['SECRET_KEY'])
         send_forensic_email(email, activation_token, email_type="activation")
@@ -1008,12 +1036,26 @@ def activate():
 
     try:
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
-        user_id = data['user_id']
+        user_id = data.get('user_id')
+        email = data.get('email')
 
         conn = sqlite3.connect('forensic.db')
         c = conn.cursor()
-        c.execute('SELECT is_active FROM users WHERE id = ?', (user_id,))
-        result = c.fetchone()
+        result = None
+        if user_id and user_id != 0:
+            c.execute('SELECT is_active, id FROM users WHERE id = ?', (user_id,))
+            result = c.fetchone()
+        elif email:
+            c.execute('SELECT is_active, id FROM users WHERE email = ?', (email,))
+            result = c.fetchone()
+            if result:
+                user_id = result[1]
+
+        if not result:
+            c.execute('SELECT is_active, id FROM users WHERE is_active = 0 ORDER BY id DESC LIMIT 1')
+            result = c.fetchone()
+            if result:
+                user_id = result[1]
 
         if not result:
             conn.close()
@@ -1394,6 +1436,11 @@ def google_login():
             c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 1, ?, ?, ?, 0)', 
                       (username, hashed, email, 'active', password_history_json, datetime.now().isoformat()))
             user_id = c.lastrowid
+            if not user_id:
+                c.execute('SELECT id FROM users WHERE email = ?', (email,))
+                row = c.fetchone()
+                if row:
+                    user_id = row[0]
             conn.commit()
             is_admin = 0
             force_password_change = 0
@@ -1465,6 +1512,11 @@ def facebook_login():
             c.execute('INSERT INTO users (username, password, email, is_active, account_status, password_history, last_password_change, failed_attempts) VALUES (?, ?, ?, 1, ?, ?, ?, 0)', 
                       (username, hashed, email, 'active', password_history_json, datetime.now().isoformat()))
             user_id = c.lastrowid
+            if not user_id:
+                c.execute('SELECT id FROM users WHERE email = ?', (email,))
+                row = c.fetchone()
+                if row:
+                    user_id = row[0]
             conn.commit()
             is_admin = 0
             force_password_change = 0
